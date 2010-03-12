@@ -150,6 +150,7 @@ type
     FUseSignoff : Boolean;
     FUseTrackUsers: boolean;
     FPushAtEnd  : boolean;
+    FIncludeBranches : boolean;
 
     function rDebug(opt : TCollateDebugOpts): boolean;
     procedure wDebug(opt : TCollateDebugOpts; NewVal: boolean);
@@ -2596,10 +2597,22 @@ begin
   end
   else if Length(parentRev) > Length(childRev) then
     result := false
-  else if MatchesStart(parentRev, childRev, 0) then
+  else if MatchesStart(parentRev, childRev, Length(parentRev)) then
     result := ValAt(childRev, LastDot(childRev)) = 0
   else
     result := false;
+end;
+
+function IsBranchRevision( revision : String) : boolean;
+var
+  idx : integer;
+  ch : CHar;
+begin
+  idx := 0;
+  for ch in revision do
+    if ch = '.' then
+      inc(idx);
+  result :=  idx > 1;
 end;
 
 function TTCCollator.LoadGroupDependencies: Boolean;
@@ -2607,6 +2620,7 @@ var
   idx, idr, findRev, lastProg, totalProg: integer;
   curFile: TFileInfo;
   rev, nrev: TRevisionInfo;
+  isBranchRev, curisBranchRev : Boolean;
 begin
   Write('Load Dependencies: 0');
 
@@ -2623,6 +2637,7 @@ begin
     for idr := curFile.Revisions.Count - 1 downto 0 do
     begin
       rev := curFile.Revisions[idr];
+      curisBranchRev := IsBranchRevision(rev.RevisionName);
       if not rev.Required then
         continue;
       if not assigned(rev.AssignedGroup.PreDepends) then
@@ -2635,24 +2650,31 @@ begin
       for findRev := idr + 1 to curFile.Revisions.Count - 1 do
       begin
         nrev := curFile.Revisions[findRev];
-        if IsParentOf(rev.RevisionName, nrev.RevisionName) and (nrev.Required)
-          and (rev.AssignedGroup <> nrev.AssignedGroup) then
+        isbranchRev := IsBranchRevision(nrev.RevisionName);
+        if (nrev.Required)  and (rev.AssignedGroup <> nrev.AssignedGroup) then
         begin
-          rev.AssignedGroup.PreDepends.Add(nrev.AssignedGroup);
-          break;
+          if (not curIsBranchRev and not isBranchRev) or
+            IsParentOf(rev.RevisionName, nrev.RevisionName) then
+            rev.AssignedGroup.PreDepends.Add(nrev.AssignedGroup);
         end;
+        if not isBranchRev then
+          break; // Break after the first non-branch revision
       end;
 
       // Assign post depends.
       for findRev := idr - 1 downto 0 do
       begin
         nrev := curFile.Revisions[findRev];
-        if IsParentOf(nrev.RevisionName, rev.RevisionName) and (nrev.Required)
-          and (rev.AssignedGroup <> nrev.AssignedGroup) then
+        isbranchRev := IsBranchRevision(nrev.RevisionName);
+        if (nrev.Required) and (rev.AssignedGroup <> nrev.AssignedGroup) then
         begin
-          rev.AssignedGroup.PostDepends.Add(nrev.AssignedGroup);
-          break;
+          if (not curisBranchRev and not isBranchRev)
+             or IsParentOf(rev.RevisionName, nrev.RevisionName) then
+            rev.AssignedGroup.PostDepends.Add(nrev.AssignedGroup);
         end;
+
+        if not IsBranchRev then // Break after the first non-branch revision
+          break;
       end;
     end;
   end;
