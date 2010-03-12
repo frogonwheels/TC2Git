@@ -119,6 +119,7 @@ type
   private
     procedure CollateCheckins;
     procedure GetAuthorsFilename(var fname: string);
+    procedure DoDump(var F: Text);
   protected
     FConnection, FUsername, FPassword : String;
     FProjects: TProjectList;
@@ -240,7 +241,9 @@ type
     //: Load TC repository information
     procedure Load;
     //: Dump objects
-    procedure Dump;
+    procedure Dump( Filename : String); overload;
+    //: Dump to stdout
+    Procedure Dump; overload;
     //: Perform sync TC->GIT
     procedure Perform;
     //: TODO Perform upload (GIT->TC)
@@ -362,7 +365,7 @@ var
   promptlist: TStringList;
   doUpload: Boolean;
   found : boolean;
-
+  dumpFile : String;
 begin
   paramlist := TStringList.Create;
   try
@@ -371,6 +374,7 @@ begin
     Connection := '';
     OutputDir := '';
     codetag := '';
+    dumpfile := '';
     Prompt := [pmNew, pmCommit, pmFinal, pmGarbage, pmPush, pmMerge];
     DiffSecs := CMaxSecsGap;
     idx := 1;
@@ -485,11 +489,20 @@ begin
           'Z','z':
               collator.GarbageCollect := true;
           '-','/':
-              case IndexText( copy(curParam, 3,length(curParam)-2), ['trackusers', 'push']) of
+              case IndexText( copy(curParam, 3,length(curParam)-2), ['trackusers', 'push', 'dump']) of
                 0:{trackusers} collator.UseTrackUsers := true;
                 1:{push} collator.PushAtEnd := true;
+                2:{dump}
+                begin
+                  inc(idx);
+                  if idx <= ParamCount then
+                    dumpFile := ParamStr(idx);
+                end;
+              else
+                raise exception.Create('Unknown option:'+CurParam);
               end;
-
+        else
+          raise exception.Create('Unknown option'+CurParam);
         end;
       end;
       inc(idx);
@@ -559,9 +572,15 @@ begin
 
     // Load and collate the project's checkins.
     collator.Load;
+    if dumpFile <> '' then
+      collator.Dump(dumpFile);
 
     if OutputDir = '' then
-      collator.Dump
+    begin
+      if dumpFile = '' then
+        collator.Dump
+
+    end
     else
     begin
       // Perform download from TC -> Local GIT
@@ -626,38 +645,51 @@ begin
   inherited;
 
 end;
-
+procedure TTCCollator.Dump( Filename : String);
+var
+  F : Text;
+begin
+  AssignFile(F, FileName);
+  Rewrite(F);
+  try
+    DoDump(F);
+  Finally
+    CloseFile(f);
+  end;
+end;
 procedure TTCCollator.Dump;
+begin
+  DoDump(output);
+end;
+
+procedure TTCCollator.DoDump(var F: Text);
 var
   checkin: TCheckinGroup;
+  cmt: string;
   revision: TRevisionInfo;
   Comments: TStringList;
-  cmt: string;
 begin
   Comments := TStringList.Create;
   try
     for checkin in FCheckins do
     begin
-      Writeln('--');
-      Writeln('User: ' + checkin.Author);
-      Writeln('Date: ' + FormatDateTime('yyyy.mm.dd hh:nn', checkin.LabelDate));
-      Writeln('Comments: ');
-
+      Writeln(F, '--');
+      Writeln(F, 'User: ' + checkin.Author);
+      Writeln(F, 'Date: ' + FormatDateTime('yyyy.mm.dd hh:nn', checkin.LabelDate));
+      Writeln(F, 'Comments: ');
       Comments.Text := checkin.Comments;
       for cmt in Comments do
       begin
-        Write('  ');
-        Writeln(cmt);
+        Write(F, '  ');
+        Writeln(F, cmt);
       end;
-
-      Writeln('Files:');
+      Writeln(F, 'Files:');
       for revision in checkin.Revisions do
       begin
-        Write('  File: (' + IntToStr(revision.RevisionID)
-            + ') ' + revision.FileInf.Filename);
+        Write(F, '  File: (' + IntToStr(revision.FileInf.ItemID) + 'v' + revision.RevisionName + ') ' + revision.FileInf.Filename);
         if assigned(revision.FileInf.Folder) then
-          Write(' in "' + revision.FileInf.Folder.FolderName + '"');
-        Writeln(' to "$' + GetPathToRoot(revision.FileInf.ParentID) + '"');
+          Write(F, ' in "' + revision.FileInf.Folder.FolderName + '"');
+        Writeln(F, ' to "$' + GetPathToRoot(revision.FileInf.ParentID) + '"');
       end;
     end;
   finally
