@@ -320,6 +320,8 @@ const
     'push','merge');
 
 procedure WritePercent(curcount, totalCount: longint; var lastProg: integer); forward;
+function IsBranchRevision( revision : String) : boolean; forward;
+function IsParentOf(childRev, parentRev: String): Boolean; forward;
 
 procedure VcsErrCvt( Res : integer; Extra : String = '');
 begin
@@ -2111,25 +2113,39 @@ procedure TTCCollator.Prune;
 var
   submodule : TPair<String, TSubmoduleInf>;
   smoddir  : string;
+  FileInf : TFileInfo;
+  revInf  : TRevisionInfo;
 begin
-  PruneDir( FOutputDir);
-  if Assigned(FSubmoduleMaps) and (FSubmoduleMaps.Count > 0) then
-  for submodule in FSubmoduleMaps do
+  if FOutputDir <> '' then
   begin
-    if submodule.value.IsSubmodule then
-        // It's a proper submodule
-      smoddir := IncludeTrailingPathDelimiter(FOutputDir)+ submodule.key
-    else
+    PruneDir( FOutputDir);
+    if Assigned(FSubmoduleMaps) and (FSubmoduleMaps.Count > 0) then
+    for submodule in FSubmoduleMaps do
     begin
-      // It's an extracted module
-      smoddir := submodule.Value.Path;
-      if (smoddir <> '') and (smoddir[1] = '.') then
-          smoddir := IncludeTrailingPathDelimiter(FOutputDir)+ smoddir; // Relative
-    end;
+      if submodule.value.IsSubmodule then
+          // It's a proper submodule
+        smoddir := IncludeTrailingPathDelimiter(FOutputDir)+ submodule.key
+      else
+      begin
+        // It's an extracted module
+        smoddir := submodule.Value.Path;
+        if (smoddir <> '') and (smoddir[1] = '.') then
+            smoddir := IncludeTrailingPathDelimiter(FOutputDir)+ smoddir; // Relative
+      end;
 
-    // Prune the submodule/extracted module
-    if DirHasGit(Smoddir)  then
-      PruneDir(smoddir);
+      // Prune the submodule/extracted module
+      if DirHasGit(Smoddir)  then
+        PruneDir(smoddir);
+    end;
+  end;
+  if not FIncludeBranches then
+  begin
+    for FileInf in FFiles do
+      for revInf in FileInf.Revisions do
+      begin
+        if IsBranchRevision(revInf.RevisionName) then
+          revInf.Required := false;
+      end;
   end;
 end;
 
