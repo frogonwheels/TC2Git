@@ -368,6 +368,7 @@ var
   promptlist: TStringList;
   doUpload: Boolean;
   found : boolean;
+  doFetch : boolean;
   dumpFile : String;
 begin
   paramlist := TStringList.Create;
@@ -378,6 +379,7 @@ begin
     OutputDir := '';
     codetag := '';
     dumpfile := '';
+    doFetch := true;
     Prompt := [pmNew, pmCommit, pmFinal, pmGarbage, pmPush, pmMerge];
     DiffSecs := CMaxSecsGap;
     idx := 1;
@@ -492,7 +494,8 @@ begin
           'Z','z':
               collator.GarbageCollect := true;
           '-','/':
-              case IndexText( copy(curParam, 3,length(curParam)-2), ['trackusers', 'push', 'dump']) of
+              case IndexText( copy(curParam, 3,length(curParam)-2),
+          ['trackusers', 'push', 'dump', 'no-fetch']) of
                 0:{trackusers} collator.UseTrackUsers := true;
                 1:{push} collator.PushAtEnd := true;
                 2:{dump}
@@ -501,6 +504,8 @@ begin
                   if idx <= ParamCount then
                     dumpFile := ParamStr(idx);
                 end;
+                3:{no-fetch}
+                  doFetch := false;
               else
                 raise exception.Create('Unknown option:'+CurParam);
               end;
@@ -527,6 +532,8 @@ begin
         ' /S[+-]               Enable/disable signoff'#13#10+
         ' --trackusers         Load users from Track'#13#10+
         ' --push               Push all repos at end'#13#10+
+        ' --dump <file>        Dump commits to file'#13#10+
+        ' --no-fetch           Don''t fetch from TC'#13#10+
         ' @  <filename>        Filename with renames and skips'#13#10+
         '     path=newpath     Export to different path (relative to the output dir)'#13#10+
         '     path=-           Skip exports'#13#10 +
@@ -584,7 +591,7 @@ begin
         collator.Dump
 
     end
-    else
+    else if doFetch then
     begin
       // Perform download from TC -> Local GIT
       collator.Perform;
