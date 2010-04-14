@@ -103,7 +103,7 @@ type
 
   // Runtime options
   TPromptMode = (pmNew, pmFile, pmCommit, pmCheckin, pmFinal, pmUpdateRef, pmGarbage, pmPush, pmMerge);
-  TCollateDebugOpts = (cdoInit, cdoMaps, cdoDetail, cdoFileGet, cdoFileadd, cdoCommits, cdoPush, cdoMerge  );
+  TCollateDebugOpts = (cdoInit, cdoMaps, cdoDetail, cdoFileGet, cdoFileadd, cdoCommits, cdoPush, cdoMerge, cdoPruneLog  );
   TPromptModes = set of TPromptMode;
 
   TSubmoduleType = (stMain, stSubmodule, stExtract);
@@ -269,7 +269,7 @@ type
     //: Set debug flag.
     procedure SetDebug( const strVal : String);
 
-    procedure GitAllProjects(cmd: array of string; return: TStrings = nil; echo: Boolean = true; MainProject : Boolean = true);
+    procedure GitAllProjects(cmd: array of string; logName : string; return: TStrings = nil; echo: Boolean = true; MainProject : Boolean = true);
 
     //: All TC Projects
     property Project[idx: integer]: String read rProject;
@@ -315,7 +315,7 @@ const
   CRevBegin = '--##--';
   CRevEnd = '##--##';
   CDebugOpts : array[Low(TCollateDebugOpts)..high(TCollateDebugOpts)] of string
-  = ( 'init', 'maps', 'detail', 'fileget', 'fileadd', 'commits', 'push', 'merge');
+  = ( 'init', 'maps', 'detail', 'fileget', 'fileadd', 'commits', 'push', 'merge', 'prunelog');
   CPrompts : array [low(TPromptMode)..high(TPromptMode)] of string
   =('new', 'file', 'commit', 'checkin', 'final', 'ref', 'garbage',
     'push','merge');
@@ -570,7 +570,7 @@ begin
 
     // Check if there are modifications to the repositories.
 
-    if (OutputDir <> '') and collator.CheckModifiedRepositories  then
+    if (OutputDir <> '') and doFetch and collator.CheckModifiedRepositories  then
       exit;
 
     // Load and collate the project's checkins.
@@ -1630,14 +1630,14 @@ begin
     procHrs := procTime div 60;
     WriteLn(Format('Processing Time: %d hrs %d mins %d secs',
       [procHrs, prcMins, prcSecs]));
-    GitAllProjects(['repack']);
-    GitAllProjects(['prune-packed']);
+    GitAllProjects(['repack'], 'Repack: %s');
+    GitAllProjects(['prune-packed'], 'Prune: %s');
     //
     if FGarbageCollect then
     begin
       if Prompt(pmGarbage) then
       begin
-        GitAllProjects(['gc']);
+        GitAllProjects(['gc'],'Garbage Collect:%s');
         WriteLn('Finished GC: '+FormatDateTime('ddmmm hh:nn', Now));
       end;
     end;
@@ -1661,9 +1661,9 @@ procedure TTCCollator.MergeAll;
 begin
   if FBranch <> '' then
   begin
-    GitAllProjects(['checkout',FBranch], nil, cdoMerge in FDebugOpts);
+    GitAllProjects(['checkout',FBranch], 'Checkout: %s', nil, cdoMerge in FDebugOpts);
 
-    GitAllProjects(['merge',TCTag], nil, cdoMerge in FDebugOpts);
+    GitAllProjects(['merge',TCTag], 'Merge: %s to '+FBranch, nil, cdoMerge in FDebugOpts);
   end;
 end;
 
@@ -1676,9 +1676,11 @@ begin
     pushBranch := 'master'
   else
     pushBranch := FBranch;
+  WriteLn('Pushing to server');
   // First all the other projects
-  GitAllProjects(['push', 'server', pushBranch], nil, cdoPush in FDebugOpts, false);
+  GitAllProjects(['push', 'server', pushBranch], 'Push :%s', nil, cdoPush in FDebugOpts, false);
   // then the main
+  WriteLn('Pushing Main project');
   Git(['push', 'server', pushBranch], nil, cdoPush in FDebugOpts);
 end;
 
@@ -2166,7 +2168,7 @@ begin
   gitout := TStringList.Create;
   try
     // Dump full log of tag
-    Git(['log', TCTag ], gitout, false, Path);
+    Git(['log', TCTag ], gitout, cdoPruneLog in FDebugOpts, Path);
 
     inSection := false;
     lastProg := -1;
@@ -2705,11 +2707,12 @@ begin
 
   AssignFolders;
 
-  Write('Revisions: 0.');
-  lastProg := 0;
+  Write('Revisions: ');
+  lastProg := -1;
   totalProg := FFiles.Count - 1;
   for idx := 0 to FFiles.Count - 1 do
   begin
+    WritePercent(idx, totalProg, lastProg);
     curFile := FFiles[idx];
     if CurFile.Required then
     begin
@@ -2717,7 +2720,7 @@ begin
       loadRi.pfi := curFile;
       VcsErrCvt(VcsEnumRevisions(curFile.ItemID, LoadRevisionsList, @loadRi));
     end;
-    WritePercent(idx, totalProg, lastProg);
+
   end;
   Writeln('.');
 
@@ -2928,7 +2931,7 @@ begin
   end;
 end;
 
-procedure TTCCollator.GitAllProjects(cmd: array of string; return: TStrings = nil; echo: Boolean = true; MainProject : Boolean = true);
+procedure TTCCollator.GitAllProjects(cmd: array of string; logName : string;return: TStrings = nil; echo: Boolean = true; MainProject : Boolean = true);
 var
   submodule : TPair<String, TSubmoduleInf>;
   smoddir, curval : string;
@@ -2940,7 +2943,10 @@ begin
     try
       // Perform command on main project.
       if MainProject then
+      Begin
+        WriteLn(Format(logName, [FOutputDir]));
         Git(cmd, return, echo);
+      End;
 
       if Assigned(FSubmoduleMaps) and (FSubmoduleMaps.Count > 0) then
       begin
@@ -2960,6 +2966,7 @@ begin
           end;
           if DirHasGit(Smoddir)  then
           begin
+            WriteLn(Format(logName, [FOutputDir]));
             // Perform command on submodules/extracted modules
             Git(cmd, retList, echo, Smoddir);
 
