@@ -175,6 +175,7 @@ type
     function GetSignOff(const Author: String): String;
     //: The Tag used in Git to reference the last version extracted from TC 
     function TCTag: string;
+    function TCTagOld: string;
 
     {: Perform an (option) prompt.
       @return false to cancel
@@ -203,7 +204,7 @@ type
     function InitGit: Boolean;
     {: Return true if the required reference exists.
     }
-    function HasTCRef( DirName : string = #0): Boolean;
+    function HasTCRef( DirName : string = #0; oldRef : boolean = false): Boolean;
 
     {: Check for dates out of order.
     }
@@ -1068,15 +1069,15 @@ begin
   ExecCmd(GitPath, gitcmd, cmd, return, echo);
 end;
 
-function TTCCollator.HasTCRef( DirName : string = #0): Boolean;
+function TTCCollator.HasTCRef( DirName : string = #0; oldRef : boolean = false): Boolean;
 begin
   if DirName = #0 then
     DirName := FOutputDir;
   if not DirHasGit(DirName) then
     result := false
   else
-    result := FileExists(IncludeTrailingPathDelimiter(DirName)
-        + '.git\refs\heads\' + TCTag);
+    result := FileExists(IncludeTrailingPathDelimiter(  DirName)
+        + '.git\refs\heads\' + IfThen(oldRef,TCTagOld,TCTag));
 end;
 
 function TTCCollator.DirHasGit(DirName : String = #0): Boolean;
@@ -1379,21 +1380,35 @@ begin
 
     InitGit;
     if HasTCRef then
-      Git(['checkout', TCTag]);
+      Git(['checkout', TCTag])
+    else
+    begin
+      if HasTCRef(#0,true) then
+        Git(['checkout', TCTagOld]);
+      Git(['checkout', '-b', TCTag]);
+    end;
     for submodule in FSubmoduleMaps do
     begin
       if submodule.Value.IsSubmodule then
           // It's a proper submodule .. Checkout the tag
         smoddir := IncludeTrailingPathDelimiter(FOutputDir)+ submodule.key
-     else
-     begin
+      else
+      begin
          // It's an extracted module
         smoddir := submodule.Value.Path;
         if (smoddir <> '') and (smoddir[1] = '.') then
           smoddir := IncludeTrailingPathDelimiter(FOutputDir)+ smoddir; // Relative
-     end;
-     if HasTCRef(smoddir) then
-       Git(['checkout', TCTag],nil,true,smoddir);
+      end;
+      if HasTCRef(smoddir) then
+        Git(['checkout', TCTag],nil,true,smoddir)
+      else
+      begin
+        if HasTCRef(smoddir, true) then
+          Git(['checkout', TCTagOld],nil,true,smoddir);
+
+        Git(['checkout', '-b', TCTag],nil,true,smoddir);
+      end;
+
     end;
     Writeln('Importing Repository');
     totalCount := FCheckins.Count;
@@ -2117,6 +2132,14 @@ end;
 function TTCCollator.TCTag: string;
 begin
   if FTag = '' then
+    result := 'imports/tc'
+  else
+    result := 'imports/tc.' + FTag;
+end;
+
+function TTCCollator.TCTagOld: string;
+begin
+  if FTag = '' then
     result := 'remotes/tc'
   else
     result := 'remotes/tc.' + FTag;
@@ -2191,7 +2214,13 @@ begin
   gitout := TStringList.Create;
   try
     // Dump full log of tag
-    Git(['log', TCTag ], gitout, cdoPruneLog in FDebugOpts, Path);
+    if HasTCRef(Path, false) then
+      Git(['log', TCTag ], gitout, cdoPruneLog in FDebugOpts, Path)
+    else if HasTCRef(Path, true) then
+      Git(['log', TCTagOld ], gitout, cdoPruneLog in FDebugOpts, Path)
+    else
+      Git(['log', 'HEAD' ], gitout, cdoPruneLog in FDebugOpts, Path);
+
 
     inSection := false;
     lastProg := -1;
