@@ -305,6 +305,8 @@ type
     //: Set true to use users from track
     property UseTrackUsers : boolean read FUseTrackUsers write FUseTrackUsers;
     property PushAtEnd: boolean read FPushAtEnd write FPushAtEnd;
+    // : Should macros be stripped from files!
+    property StripMacros: Boolean read FStripMacros write FStripMacros;
 
   end;
 
@@ -323,12 +325,13 @@ const
   CDebugOpts : array[Low(TCollateDebugOpts)..high(TCollateDebugOpts)] of string
   = ( 'init', 'maps', 'detail', 'fileget', 'fileadd', 'commits', 'push', 'merge', 'prunelog');
   CPrompts : array [low(TPromptMode)..high(TPromptMode)] of string
-  =('new', 'file', 'commit', 'checkin', 'final', 'ref', 'garbage',
+  = ('new', 'file', 'commit', 'checkin', 'final', 'ref', 'garbage',
     'push','merge');
 
 procedure WritePercent(curcount, totalCount: longint; var lastProg: integer); forward;
 function IsBranchRevision( revision : String) : boolean; forward;
 function IsParentOf(childRev, parentRev: String): Boolean; forward;
+procedure StripFileMacros(Filename: String); forward;
 
 procedure VcsErrCvt( Res : integer; Extra : String = '');
 begin
@@ -347,6 +350,7 @@ begin
     result := result + str;
   end;
 end;
+
 function DebugListStr(sep : string = ', ') : string;
 var
   str : string;
@@ -477,7 +481,7 @@ begin
             begin
               inc(idx);
               if idx <= ParamCount then
-               collator.ReadMaps(ParamStr(idx));
+                collator.ReadMaps(ParamStr(idx));
             end;
           'D','d':
             begin
@@ -501,22 +505,23 @@ begin
               collator.GarbageCollect := true;
           '-','/':
               case IndexText( copy(curParam, 3,length(curParam)-2),
-          ['trackusers', 'push', 'dump', 'no-fetch']) of
+                ['trackusers', 'push', 'dump', 'no-fetch', 'strip-macro', 'strip-macros']) of
                 0:{trackusers} collator.UseTrackUsers := true;
                 1:{push} collator.PushAtEnd := true;
                 2:{dump}
-                begin
-                  inc(idx);
-                  if idx <= ParamCount then
-                    dumpFile := ParamStr(idx);
-                end;
+                  begin
+                    inc(idx);
+                    if idx <= ParamCount then
+                      dumpFile := ParamStr(idx);
+                  end;
                 3:{no-fetch}
                   doFetch := false;
+                4,5:{strip-macro} collator.StripMacros := true;
               else
-                raise exception.Create('Unknown option:'+CurParam);
+                raise exception.Create('Unknown option:'+curParam);
               end;
         else
-          raise exception.Create('Unknown option'+CurParam);
+          raise exception.Create('Unknown option'+curParam);
         end;
       end;
       inc(idx);
@@ -540,6 +545,7 @@ begin
         ' --push               Push all repos at end'#13#10+
         ' --dump <file>        Dump commits to file'#13#10+
         ' --no-fetch           Don''t fetch from TC'#13#10+
+        ' --strip-macro        Strip RCS expansions from file'#13#10 +
         ' @  <filename>        Filename with renames and skips'#13#10+
         '     path=newpath     Export to different path (relative to the output dir)'#13#10+
         '     path=-           Skip exports'#13#10 +
@@ -676,6 +682,7 @@ begin
     CloseFile(f);
   end;
 end;
+
 procedure TTCCollator.Dump;
 begin
   DoDump(output);
@@ -705,7 +712,8 @@ begin
       Writeln(F, 'Files:');
       for revision in checkin.Revisions do
       begin
-        Write(F, '  File: (' + IntToStr(revision.FileInf.ItemID) + 'v' + revision.RevisionName + ') ' + revision.FileInf.Filename);
+        Write(F, '  File: (' + IntToStr(revision.FileInf.ItemID)
+            + 'v' + revision.RevisionName + ') ' + revision.FileInf.Filename);
         if assigned(revision.FileInf.Folder) then
           Write(F, ' in "' + revision.FileInf.Folder.FolderName + '"');
         Writeln(F, ' to "$' + GetPathToRoot(revision.FileInf.ParentID) + '"');
@@ -715,7 +723,6 @@ begin
     Comments.Free;
   end;
 end;
-
 
 procedure TTCCollator.AddMap(const Path, MapTo: string);
 var
@@ -1205,6 +1212,7 @@ begin
       Writeln(f, '*.sw[poqrst]');
       Writeln(f, '.authors');
       Writeln(f, '.tcdirs');
+      Writeln(F, '*.origin');
     finally
       CloseFile(f);
     end;
@@ -1259,6 +1267,46 @@ procedure TSubmoduleCommit.BeforeDestruction;
 begin
   refs.Free;
   inherited;
+end;
+
+// returns true if dfm file is in a binary format : Delphidabbler.com
+function IsDFMBinary(Filename: string): Boolean;
+var
+  F: TFileStream;
+  B: Byte;
+begin
+  B := 0;
+  F := TFileStream.Create(Filename, fmOpenRead);
+  try
+    F.Read(B, 1);
+    result := B = $FF;
+  finally
+    F.Free;
+  end;
+end;
+
+// convert a binary dfm file to a text dfm file : Delphidabbler.com
+function Dfm2Txt(Src, Dest: string): Boolean;
+var
+  SrcS, DestS: TFileStream;
+begin
+  if Src = Dest then
+  begin
+    result := false;
+    exit;
+  end;
+  SrcS := TFileStream.Create(Src, fmOpenRead);
+  DestS := TFileStream.Create(Dest, fmCreate);
+  try
+    ObjectResourceToText(SrcS, DestS);
+    if FileExists(Src) and FileExists(Dest) then
+      result := true
+    else
+      result := false;
+  finally
+    SrcS.Free;
+    DestS.Free;
+  end;
 end;
 
 procedure TTCCollator.Perform;
@@ -1341,6 +1389,7 @@ var
       CloseFile(f);
     end;
   end;
+
 var
   SubmoduleRoot, SubModulePath, gitPath  : string;
   SubmoduleCommits : TObjectDictionary<String, TSubmoduleCommit>;
@@ -1360,6 +1409,7 @@ var
   hasSubmoduleCommit : boolean;
   submodule : TPair<String, TSubmoduleInf>;
   smoddir : string;
+  stripfile: string;
 begin
   LoadAuthors;
   commitName := IncludeTrailingPathDelimiter(FOutputDir) + 'commit.$$$';
@@ -1604,9 +1654,34 @@ begin
           begin
             // If any of the 'File Group' extensions, then add them in too.
             gitnameext := ChangeFileExt(gitname, extension);
-            if FileExists(outDir + gitnameext) then
+            stripfile := outDir + gitnameext;
+            if FileExists(stripfile) then
+            begin
+              // Process files.
+              case IndexText(extension, ['.dfm', '.pas', '.dpr']) of
+                0: { DFM }
+                  if IsDFMBinary(stripfile) then
+                  begin
+                    if Dfm2Txt(stripfile, stripfile + '.texted') then
+                    begin
+                      if FileExists(stripfile + '.origin') then
+                        sysutils.DeleteFile(stripfile + '.origin');
+                      if not sysutils.RenameFile(stripfile,
+                        stripfile + '.origin') then
+                        Writeln('Rename ' + stripfile + ' to origin failed')
+                      else if not sysutils.RenameFile(stripfile + '.texted',
+                        stripfile) then
+                        Writeln('Rename of ' + stripfile + '.texted failed');
+                    end;
+                  end;
+                1: { PAS,DPR }
+                  if FStripMacros then
+                    StripFileMacros(stripfile);
+              end;
+
               // Add file (use -- to make sure the file is treated as a file)
-              Git(['add', '--', gitnameext],nil, cdoFileadd in FDebugOpts, outdir);
+              Git(['add', '--', gitnameext], nil, cdoFileadd in FDebugOpts, outDir);
+            end
           end;
 
         end;
@@ -1615,7 +1690,7 @@ begin
           raise Exception.Create('User Aborted');
 
         // Commit changes to submodules.
-        for modCommit  in SubmoduleCommits do
+        for modCommit in SubmoduleCommits do
         begin
           SubmoduleRoot := modCommit.key;
           WriteCommitComment(commitName, Comments, modCommit.Value.Refs);
@@ -1630,7 +1705,7 @@ begin
         // Add submodule changes to commit.
         //
         hasSubmoduleCommit := false;
-        for modCommit  in SubmoduleCommits do
+        for modCommit in SubmoduleCommits do
           if modCommit.Value.IsSubmodule then
           begin
             Git(['add', '--', modCommit.Key],nil, cdoFileadd in FDebugOpts);
@@ -1730,8 +1805,7 @@ function TTCCollator.getFileInfoForPath(const Filename: string): TFileInfo;
   begin
     result := nil;
     for Folder in FFolders do
-      if (Folder.Value.ParentID = ParentID) and (CompareText(Folder.Value.FolderName, FolderName) = 0)
-        then
+      if (Folder.Value.ParentID = ParentID) and (CompareText(Folder.Value.FolderName, FolderName) = 0) then
       begin
         result := Folder.Value;
         break;
@@ -1980,7 +2054,8 @@ var
 const
   CMsg: array [ low(TPromptMode) .. high(TPromptMode)] of string =
     ('Create GIT Repo', 'Process File', 'Commit Changes', 'Next Checkin',
-    'Finish', 'Update Ref', 'Garbage Collect', 'Merge to Branch', 'Push Changes');
+    'Finish', 'Update Ref', 'Garbage Collect', 'Merge to Branch',
+    'Push Changes');
 begin
   result := true;
   if (pm in FPromptMode) then
@@ -2007,8 +2082,7 @@ begin
         break;
       end;
     until false;
-    Inc(FPromptMSecs, MilliSecondsBetween(now,promptStart));
-    
+    Inc(FPromptMSecs, MilliSecondsBetween(Now, promptStart));
   end;
 end;
 
@@ -2167,25 +2241,26 @@ var
 begin
   if FOutputDir <> '' then
   begin
-    PruneDir( FOutputDir);
+    PruneDir(FOutputDir);
     if Assigned(FSubmoduleMaps) and (FSubmoduleMaps.Count > 0) then
-    for submodule in FSubmoduleMaps do
-    begin
-      if submodule.value.IsSubmodule then
-          // It's a proper submodule
-        smoddir := IncludeTrailingPathDelimiter(FOutputDir)+ submodule.key
-      else
+      for submodule in FSubmoduleMaps do
       begin
-        // It's an extracted module
-        smoddir := submodule.Value.Path;
-        if (smoddir <> '') and (smoddir[1] = '.') then
-            smoddir := IncludeTrailingPathDelimiter(FOutputDir)+ smoddir; // Relative
-      end;
+        if submodule.Value.IsSubmodule then
+          // It's a proper submodule
+          smoddir := IncludeTrailingPathDelimiter(FOutputDir) + submodule.Key
+        else
+        begin
+          // It's an extracted module
+          smoddir := submodule.Value.Path;
+          if (smoddir <> '') and (smoddir[1] = '.') then
+            smoddir := IncludeTrailingPathDelimiter(FOutputDir) + smoddir;
+          // Relative
+        end;
 
-      // Prune the submodule/extracted module
-      if DirHasGit(Smoddir)  then
-        PruneDir(smoddir);
-    end;
+        // Prune the submodule/extracted module
+        if DirHasGit(smoddir) then
+          PruneDir(smoddir);
+      end;
   end;
   if not FIncludeBranches then
   begin
@@ -2300,7 +2375,6 @@ begin
     gitout.free;
   end;
 end;
-
 
 function CompareDates(lhs, rhs: TDateTime): integer;
 begin
@@ -2735,7 +2809,6 @@ begin
   Writeln('.');
 
 end;
-
 {$ENDIF}
 
 procedure TTCCollator.Load;
@@ -3510,6 +3583,207 @@ begin
       TrkEnumUsers(EnumAddUsers, self);
     // Ignore any error - just won't be loaded - not the end of the world.
   except
+  end;
+end;
+
+type
+  TCommentType = (ctNone, ctBrace, ctBrStar);
+
+function isStillComment(const curline: string;
+  incomment: TCommentType): TCommentType;
+var
+  idx: integer;
+begin
+
+  for idx := 1 to Length(curline) do
+    case curline[idx] of
+      '{':
+        if incomment = ctNone then
+          incomment := ctBrace;
+      '}':
+        if incomment = ctBrace then
+          incomment := ctNone;
+      '(':
+        if (incomment = ctNone) and (idx < Length(curline)) and
+          (curline[idx + 1] = '*') then
+          incomment := ctBrStar;
+      ')':
+        if (incomment = ctBrStar) and (idx < Length(curline)) and
+          (curline[idx + 1] = '*') then
+          incomment := ctNone;
+    end;
+  result := incomment;
+end;
+
+procedure StripFileMacros(Filename: String);
+var
+  Inf, OutF: TextFile;
+  idx, posColon, posDollar: integer;
+  curline, outName, prevline: string;
+  inlog, skipline, hasPrevline, outPrevLine: Boolean;
+  skipped: Boolean;
+  incomment, outComment: TCommentType;
+  procedure CheckLine(startIdx: integer);
+  begin
+    idx := startIdx;
+    if idx = 0 then
+      idx := 1;
+    while idx < Length(curline) do
+      case curline[idx] of
+        ' ', #9, '#':
+          inc(idx);
+      else
+        break;
+      end;
+    if (idx > startIdx) and (idx < Length(curline)) then
+    begin
+      if (curline[idx] = '$') then
+      begin
+        posDollar := PosEx('$', curline, idx + 4);
+        if (posDollar > 0) then
+        begin
+          // It's a $ $ keyword
+          skipline := true;
+        end
+        else
+        begin
+          posColon := PosEx(':', curline, 4);
+          if CompareText(copy(curline, idx + 1, posColon - (idx + 1)), 'LOG')
+            = 0 then
+          begin
+            inlog := true;
+            if outPrevLine then
+              outPrevLine := false; // Don't output it
+          end;
+        end;
+      end;
+    end
+    else if not inlog then
+    begin
+      // At eol still in {
+      if not hasPrevline and (startIdx > 0) then
+      begin
+        if isStillComment(curline, incomment) <> ctNone then
+        begin
+          hasPrevline := true;
+          prevline := curline;
+        end;
+      end;
+    end;
+  end;
+
+begin
+  AssignFile(Inf, Filename);
+  outName := Filename + '.stripped';
+  AssignFile(OutF, outName);
+  Reset(Inf);
+  try
+    Rewrite(OutF);
+    try
+      inlog := false;
+      skipped := false;
+      hasPrevline := false;
+      outPrevLine := false;
+      prevline := '';
+      (* wasComment := ctNone; *)
+      incomment := ctNone;
+      outComment := ctNone;
+      while not EOF(Inf) do
+      begin
+        skipline := false;
+        ReadLn(Inf, curline);
+        if Length(curline) > 0 then
+        begin
+          case curline[1] of
+            '{':
+              CheckLine(2);
+            '}':
+              ;
+          else
+            if not inlog and outPrevLine then
+            begin
+              CheckLine(0);
+            end
+            else if inlog then
+            begin
+              if incomment = ctNone then
+              begin
+                inlog := false;
+
+                case outComment of
+                  ctNone:
+                    ;
+                  ctBrace:
+                    Writeln(OutF, '}');
+                  ctBrStar:
+                    Writeln(OutF, '*)');
+                end;
+                outComment := ctNone;
+              end;
+            end
+            else if incomment <> ctNone then
+              CheckLine(0)
+            else if not skipped then
+            begin
+              // Try and short-cut
+              if StartsText(curline, 'interface') then
+                break;
+              if StartsText(curline, 'implementation') then
+                break;
+            end;
+          end;
+        end;
+        incomment := isStillComment(curline, incomment);
+
+        if inlog or skipline then
+        begin
+          skipped := true
+        end
+        else if not hasPrevline then
+        begin
+          if (Length(curline) > 0) and CharInSet(curline[Length(curline)],
+            [' ', #9]) then
+          begin
+            skipped := true;
+            curline := TrimRight(curline);
+          end;
+          if outPrevLine then
+          begin
+            Writeln(OutF, prevline);
+            outPrevLine := false;
+            outComment := isStillComment(prevline, outComment);
+          end;
+          Writeln(OutF, curline);
+          outComment := isStillComment(curline, outComment);
+        end
+        else
+        begin
+          outPrevLine := hasPrevline;
+          hasPrevline := false;
+        end;
+
+      end;
+    finally
+      CloseFile(OutF);
+    end;
+
+  finally
+    CloseFile(Inf);
+  end;
+
+  if skipped then
+  begin
+    // writeln(Filename+': Stripped.');
+    if FileExists(Filename + '.origin') then
+      sysutils.DeleteFile(Filename + '.origin');
+    if not sysutils.RenameFile(Filename, Filename + '.origin') then
+      Writeln('Rename ' + Filename + ' to origin failed')
+    else if not sysutils.RenameFile(outName, Filename) then
+      Writeln('Rename of ' + outName + ' failed');
+  end
+  else
+  begin
+    sysutils.DeleteFile(outName);
   end;
 end;
 
