@@ -3607,19 +3607,20 @@ begin
         if (incomment = ctNone) and (idx < Length(curline)) and
           (curline[idx + 1] = '*') then
           incomment := ctBrStar;
-      ')':
+      '*':
         if (incomment = ctBrStar) and (idx < Length(curline)) and
-          (curline[idx + 1] = '*') then
+          (curline[idx + 1] = ')') then
           incomment := ctNone;
     end;
   result := incomment;
 end;
 
-procedure StripFileMacros(Filename: String);
+
+function DoStripFileMacros(Filename, outname : String; checkonly : boolean) : boolean;
 var
   Inf, OutF: TextFile;
   idx, posColon, posDollar: integer;
-  curline, outName, prevline: string;
+  curline, prevline : string;
   inlog, skipline, hasPrevline, outPrevLine: Boolean;
   skipped: Boolean;
   incomment, outComment: TCommentType;
@@ -3665,6 +3666,8 @@ var
       begin
         if isStillComment(curline, incomment) <> ctNone then
         begin
+          if outPrevLine then
+            Writeln(outF, prevline);
           hasPrevline := true;
           prevline := curline;
         end;
@@ -3672,14 +3675,21 @@ var
     end;
   end;
 
+var
+  foundSpecial : Boolean;
 begin
   AssignFile(Inf, Filename);
-  outName := Filename + '.stripped';
-  AssignFile(OutF, outName);
+  if not CheckOnly then
+  begin
+
+    AssignFile(OutF, outName);
+  end;
   Reset(Inf);
   try
-    Rewrite(OutF);
+    if not CheckOnly then
+      Rewrite(OutF);
     try
+      foundSpecial := false;
       inlog := false;
       skipped := false;
       hasPrevline := false;
@@ -3692,48 +3702,61 @@ begin
       begin
         skipline := false;
         ReadLn(Inf, curline);
-        if Length(curline) > 0 then
+        if (Length(curline) > 0) and CharInSet(curline[Length(curline)],
+          [' ', #9]) then
         begin
-          case curline[1] of
-            '{':
-              CheckLine(2);
-            '}':
-              ;
-          else
-            if not inlog and outPrevLine then
-            begin
-              CheckLine(0);
-            end
-            else if inlog then
-            begin
-              if incomment = ctNone then
-              begin
-                inlog := false;
+          skipped := true;
+          if not checkonly then
+            curline := TrimRight(curline);
+        end;
 
-                case outComment of
-                  ctNone:
-                    ;
-                  ctBrace:
-                    Writeln(OutF, '}');
-                  ctBrStar:
-                    Writeln(OutF, '*)');
+        if not foundSpecial then
+        begin
+          if Length(curline) > 0 then
+          begin
+            case curline[1] of
+              '{':
+                CheckLine(2);
+              '}':
+                ;
+            else
+              if not inlog and outPrevLine then
+              begin
+                CheckLine(0);
+              end
+              else if inlog then
+              begin
+                if incomment = ctNone then
+                begin
+                  inlog := false;
+
+                  case outComment of
+                    ctNone:
+                      ;
+                    ctBrace:
+                      if not CheckOnly then
+                        Writeln(OutF, '}');
+                    ctBrStar:
+                      if not CheckOnly then
+                        Writeln(OutF, '*)');
+                  end;
+                  outComment := ctNone;
                 end;
-                outComment := ctNone;
+              end
+              else if incomment <> ctNone then
+                CheckLine(0)
+              else if not skipped then
+              begin
+                // Try and short-cut
+                if StartsText(curline, 'interface') then
+                  foundSpecial := true;
+                if StartsText(curline, 'implementation') then
+                  foundSpecial := true;
               end;
-            end
-            else if incomment <> ctNone then
-              CheckLine(0)
-            else if not skipped then
-            begin
-              // Try and short-cut
-              if StartsText(curline, 'interface') then
-                break;
-              if StartsText(curline, 'implementation') then
-                break;
             end;
           end;
+          incomment := isStillComment(curline, incomment);
         end;
-        incomment := isStillComment(curline, incomment);
 
         if inlog or skipline then
         begin
@@ -3741,19 +3764,15 @@ begin
         end
         else if not hasPrevline then
         begin
-          if (Length(curline) > 0) and CharInSet(curline[Length(curline)],
-            [' ', #9]) then
-          begin
-            skipped := true;
-            curline := TrimRight(curline);
-          end;
           if outPrevLine then
           begin
-            Writeln(OutF, prevline);
+            if not CheckOnly then
+              Writeln(OutF, prevline);
             outPrevLine := false;
             outComment := isStillComment(prevline, outComment);
           end;
-          Writeln(OutF, curline);
+          if not CheckOnly then
+            Writeln(OutF, curline);
           outComment := isStillComment(curline, outComment);
         end
         else
@@ -3762,28 +3781,43 @@ begin
           hasPrevline := false;
         end;
 
+        if skipped and CheckOnly then
+          break;
       end;
     finally
-      CloseFile(OutF);
+      if not CheckOnly then
+        CloseFile(OutF);
     end;
 
   finally
     CloseFile(Inf);
   end;
+  result := skipped;
+  if skipped and not CheckOnly then
+end;
 
-  if skipped then
+procedure StripFileMacros(Filename : String);
+var
+  outName : String;
+begin
+
+  if DoStripFileMacros(Filename, '', true) then
   begin
-    // writeln(Filename+': Stripped.');
-    if FileExists(Filename + '.origin') then
-      sysutils.DeleteFile(Filename + '.origin');
-    if not sysutils.RenameFile(Filename, Filename + '.origin') then
-      Writeln('Rename ' + Filename + ' to origin failed')
-    else if not sysutils.RenameFile(outName, Filename) then
-      Writeln('Rename of ' + outName + ' failed');
-  end
-  else
-  begin
-    sysutils.DeleteFile(outName);
+    outName := Filename + '.stripped';
+    if DoStripFileMacros(Filename, outName, false ) then
+    begin
+      // writeln(Filename+': Stripped.');
+      if FileExists(Filename + '.origin') then
+        sysutils.DeleteFile(Filename + '.origin');
+      if not sysutils.RenameFile(Filename, Filename + '.origin') then
+        Writeln('Rename ' + Filename + ' to origin failed')
+      else if not sysutils.RenameFile(outName, Filename) then
+        Writeln('Rename of ' + outName + ' failed');
+    end
+    else
+    begin
+      sysutils.DeleteFile(outName);
+    end;
   end;
 end;
 
