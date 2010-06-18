@@ -1308,6 +1308,7 @@ var
   var
     f: TextFile;
     cmt, ref : string;
+    idx: integer;
   begin
     AssignFile(f, filename);
     Rewrite(f);
@@ -1316,9 +1317,15 @@ var
         WriteLn(f, '-')
       else
       begin
-        for cmt in Comments do
-          Writeln(f, cmt);
-        Writeln(f, '');
+        for idx := 0 to Comments.Count - 1 do
+        begin
+          cmt := Comments[idx];
+          // Add a paragraph separator from first line.
+          if (idx = 1) and (Trim(cmt) <> '') then
+            Writeln(F, '');
+          Writeln(F, cmt);
+        end;
+        Writeln(F, '');
       end;
       if FUseSignoff then
         Writeln(f, 'Signed-off-by: ' + signoff);
