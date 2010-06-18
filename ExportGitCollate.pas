@@ -2,7 +2,7 @@ unit ExportGitCollate;
 
 interface
 
-uses TCDirectIntf, Generics.Collections, classes , TrkIntf;
+uses TCDirectIntf, Generics.Collections, classes, TrkIntf;
 {$DEFINE GROUP_DEPENDS}
 
 type
@@ -102,8 +102,10 @@ type
   end;
 
   // Runtime options
-  TPromptMode = (pmNew, pmFile, pmCommit, pmCheckin, pmFinal, pmUpdateRef, pmGarbage, pmPush, pmMerge);
-  TCollateDebugOpts = (cdoInit, cdoMaps, cdoDetail, cdoFileGet, cdoFileadd, cdoCommits, cdoPush, cdoMerge, cdoPruneLog  );
+  TPromptMode = (pmNew, pmFile, pmCommit, pmCheckin, pmFinal, pmUpdateRef,
+    pmGarbage, pmPush, pmMerge);
+  TCollateDebugOpts = (cdoInit, cdoMaps, cdoDetail, cdoFileGet, cdoFileadd,
+    cdoCommits, cdoPush, cdoMerge, cdoPruneLog);
   TPromptModes = set of TPromptMode;
 
   TSubmoduleType = (stMain, stSubmodule, stExtract);
@@ -114,9 +116,9 @@ type
     Repository : String;
   end;
 
-
   TTCCollator = class
   private
+    FStripMacros: Boolean;
     procedure CollateCheckins;
     procedure GetAuthorsFilename(var fname: string);
     procedure DoDump(var F: Text);
@@ -136,6 +138,7 @@ type
     FPathMaps : TDictionary<String, String>;
     FSubmoduleMaps : TDictionary<String, TSubmoduleInf>;
     FSubmoduleCache : TObjectDictionary<String, TPair<TSubmoduleInf, String> >;
+    FSubmoduleMod: TStringList;
     FRawMaps : TStrings;
     FPromptMode: TPromptModes;
     FCommand: String;
@@ -214,7 +217,7 @@ type
     procedure DebugLn( opt : TCollateDebugOpts; Const LogVal : String);
 
     //: Extract submodule information for a path
-    function IsSubmodule(const Path : String; var SubmoduleRoot, SubModulePath : String) : TSubmoduleType;
+    function IsSubmodule(const Path : String; var SubmoduleRoot, SubModulePath : String; Mark: Boolean): TSubmoduleType;
     //: Get mapped path from original path
     function MappedPath(Const Path : String) : string;
 
@@ -269,7 +272,9 @@ type
     //: Set debug flag.
     procedure SetDebug( const strVal : String);
 
-    procedure GitAllProjects(cmd: array of string; logName : string; return: TStrings = nil; echo: Boolean = true; MainProject : Boolean = true);
+    procedure GitAllProjects(cmd: array of string; logName: string;
+      onlyMarked: Boolean; return: TStrings = nil; echo: Boolean = true;
+      MainProject: Boolean = true);
 
     //: All TC Projects
     property Project[idx: integer]: String read rProject;
@@ -616,7 +621,6 @@ begin
   FPassword := Password;
   VcsErrCvt(VcsConnect(Connection, Name, Password), Connection);
 
-
   if (FOutputDir <> '') then
   begin
     mapexcl := IncludeTrailingPathDelimiter(FOutputDir)+'.tcdirs';
@@ -637,6 +641,9 @@ begin
   FPathMaps := TDictionary<String, string>.Create;
   FSubmoduleMaps := TDictionary<String, TSubmoduleInf>.Create;
   FSubmoduleCache := TObjectDictionary<String, TPair<TSubmoduleInf, String>>.Create;
+  FSubmoduleMod := TStringList.Create;
+  FSubmoduleMod.Sorted := true;
+  FSubmoduleMod.Duplicates := dupIgnore;
   FDiffSecs := CMaxSecsGap;
   FUseSignoff := true;
 end;
@@ -651,6 +658,7 @@ begin
   FPathMaps.Free;
   FSubmoduleMaps.Free;
   FSubmoduleCache.Free;
+  FSubmoduleMod.Free;
   FUsers.Free;
   inherited;
 
@@ -802,7 +810,7 @@ begin
   end;
 end;
 
-function TTCCollator.IsSubmodule(const Path : String; var SubmoduleRoot, SubModulePath : String) : TSubmoduleType;
+function TTCCollator.IsSubmodule(const Path : String; var SubmoduleRoot, SubModulePath: String; Mark: Boolean): TSubmoduleType;
 var
   findpath : String;
   mappedTo : TPair<TSubmoduleInf,String>;
@@ -825,7 +833,6 @@ begin
     if FSubmoduleCache.TryGetValue(findpath, mappedTo) then
     begin
 
-
       SubModulePath := mappedTo.Value;
       SubmoduleRoot := mappedTo.Key.Path;
       if SplitPos <= pathlen then
@@ -840,9 +847,12 @@ begin
       end;
 
       if mappedTo.Key.IsSubmodule then
-         result := stSubmodule
+        result := stSubmodule
       else
         result := stExtract;
+
+      if Mark then
+        FSubmoduleMod.Add(SubmoduleRoot);
 
       break;
     end;
@@ -889,7 +899,6 @@ begin
   end;
 
 end;
-
 
 procedure ClearCheckoutInfo(choutinf: PCheckoutInfo);
 begin
@@ -1470,7 +1479,7 @@ begin
 
           outDir := IncludeTrailingPathDelimiter(FOutputDir);
           // Check for a sub-module
-          case IsSubmodule(basepath, SubmoduleRoot, SubModulePath) of
+          case IsSubmodule(basepath, SubmoduleRoot, SubModulePath, true) of
             stSubmodule:
             begin
               outDir := IncludeTrailingPathDelimiter(outdir+SubModuleRoot);
@@ -1637,14 +1646,14 @@ begin
     procHrs := procTime div 60;
     WriteLn(Format('Processing Time: %d hrs %d mins %d secs',
       [procHrs, prcMins, prcSecs]));
-    GitAllProjects(['repack'], 'Repack: %s');
-    GitAllProjects(['prune-packed'], 'Prune: %s');
+    GitAllProjects(['repack'], 'Repack: %s', true);
+    GitAllProjects(['prune-packed'], 'Prune: %s', true);
     //
     if FGarbageCollect then
     begin
       if Prompt(pmGarbage) then
       begin
-        GitAllProjects(['gc'],'Garbage Collect:%s');
+        GitAllProjects(['gc'],'Garbage Collect:%s', true);
         WriteLn('Finished GC: '+FormatDateTime('ddmmm hh:nn', Now));
       end;
     end;
@@ -1668,9 +1677,9 @@ procedure TTCCollator.MergeAll;
 begin
   if FBranch <> '' then
   begin
-    GitAllProjects(['checkout',FBranch], 'Checkout: %s', nil, cdoMerge in FDebugOpts);
+    GitAllProjects(['checkout',FBranch], 'Checkout: %s', true, nil, cdoMerge in FDebugOpts);
 
-    GitAllProjects(['merge',TCTag], 'Merge: %s to '+FBranch, nil, cdoMerge in FDebugOpts);
+    GitAllProjects(['merge',TCTag], 'Merge: %s to '+FBranch, true, nil, cdoMerge in FDebugOpts);
   end;
 end;
 
@@ -1685,7 +1694,7 @@ begin
     pushBranch := FBranch;
   WriteLn('Pushing to server');
   // First all the other projects
-  GitAllProjects(['push', 'server', pushBranch], 'Push :%s', nil, cdoPush in FDebugOpts, false);
+  GitAllProjects(['push', 'server', pushBranch], 'Push: %s', true, nil, cdoPush in FDebugOpts, false);
   // then the main
   WriteLn('Pushing Main project');
   Git(['push', 'server', pushBranch], nil, cdoPush in FDebugOpts);
@@ -2938,7 +2947,7 @@ begin
   end;
 end;
 
-procedure TTCCollator.GitAllProjects(cmd: array of string; logName : string;return: TStrings = nil; echo: Boolean = true; MainProject : Boolean = true);
+procedure TTCCollator.GitAllProjects(cmd: array of string; logName: string; onlyMarked: Boolean; return: TStrings = nil; echo: Boolean = true; MainProject: Boolean = true);
 var
   submodule : TPair<String, TSubmoduleInf>;
   smoddir, curval : string;
@@ -2961,8 +2970,11 @@ begin
           retList := TStringList.Create;
         for submodule in FSubmoduleMaps do
         begin
+          if onlyMarked and (FSubmoduleMod.IndexOf(submodule.Value.Path) < 0) then
+            continue; // not modified
+
           if submodule.value.IsSubmodule then
-              // It's a proper submodule
+            // It's a proper submodule
             smoddir := IncludeTrailingPathDelimiter(FOutputDir)+ submodule.key
           else
           begin
