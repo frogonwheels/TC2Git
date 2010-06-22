@@ -1,0 +1,10 @@
+ModelSupport_TC2Git/*
+*.bak
+*.orig
+__history/*
+*.7z
+*.tvsconfig
+*.dcu
+*.identcache
+*.local
+*.sw[o-z]
