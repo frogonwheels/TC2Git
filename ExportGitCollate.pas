@@ -1461,14 +1461,16 @@ begin
       end;
 
     end;
-    Writeln('Importing Repository');
+
     totalCount := FCheckins.Count;
+    Writeln(Format('Importing %d commits into repository at %s.', [totalCount,FOutputDir]));
     curPos := 0;
     lastProg := -1;
     progcount := 0;
     putdot := true;
     for checkin in FCheckins do
     begin
+      // Output progress
       thisProg := (200 * curPos) div totalCount;
       if (FDebugOpts * [cdoCommits, cdoFileadd, cdoDetail ]) <> [] then
       begin
