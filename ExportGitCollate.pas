@@ -214,6 +214,9 @@ type
     {: Traverse folders and files to find the TC information for the specified file.
     }
     function getFileInfoForPath(const Filename: string): TFileInfo;
+    {: Traverse folders to find the TC info for the specified folder
+    }
+    function getFolderInfo(ParentID: cardinal; const FolderName: String) : TFolderInfo;
 
     //: Debug output
     procedure DebugLn( opt : TCollateDebugOpts; Const LogVal : String);
@@ -278,6 +281,8 @@ type
       onlyMarked: Boolean; return: TStrings = nil; echo: Boolean = true;
       MainProject: Boolean = true);
 
+    procedure ApplyPatch(const PatchFile, patchLabel : String; checkinOnly : boolean);
+
     //: All TC Projects
     property Project[idx: integer]: String read rProject;
     //: Number of TC Projects
@@ -323,9 +328,9 @@ const
   CMaxSecsGap = 300;
   CRevBegin = '--##--';
   CRevEnd = '##--##';
-  CDebugOpts : array[Low(TCollateDebugOpts)..high(TCollateDebugOpts)] of string
+  CDebugOpts : array[TCollateDebugOpts] of string
   = ( 'init', 'maps', 'detail', 'fileget', 'fileadd', 'commits', 'push', 'merge', 'prunelog');
-  CPrompts : array [low(TPromptMode)..high(TPromptMode)] of string
+  CPrompts : array[TPromptMode] of string
   = ('new', 'file', 'commit', 'checkin', 'final', 'ref', 'garbage',
     'push','merge');
 
@@ -393,7 +398,11 @@ begin
     OutputDir := '';
     codetag := '';
     dumpfile := '';
+    patchFile := '';
+    patchLabel := '';
     doFetch := true;
+    doApplyPatch := false;
+    doOnlyCheckinPatch := false;
     Prompt := [pmNew, pmCommit, pmFinal, pmGarbage, pmPush, pmMerge];
     DiffSecs := CMaxSecsGap;
     idx := 1;
@@ -509,7 +518,8 @@ begin
               collator.GarbageCollect := true;
           '-','/':
               case IndexText( copy(curParam, 3,length(curParam)-2),
-                ['trackusers', 'push', 'dump', 'no-fetch', 'strip-macro', 'strip-macros']) of
+                ['trackusers', 'push', 'dump', 'no-fetch', 'strip-macro',
+                 'strip-macros', 'apply-patch', 'apply-label', 'apply-checkin']) of
                 0:{trackusers} collator.UseTrackUsers := true;
                 1:{push} collator.PushAtEnd := true;
                 2:{dump}
@@ -521,11 +531,27 @@ begin
                 3:{no-fetch}
                   doFetch := false;
                 4,5:{strip-macro} collator.StripMacros := true;
+                6:{apply-patch}
+                  begin
+                    doFetch := false;
+                    doApplyPatch := true;
+                    inc(idx);
+                    if idx <= ParamCount then
+                      patchFile := ParamStr(idx);
+                  end;
+                7:{apply-label}
+                  begin
+                    inc(idx);
+                    if idx <= ParamCount then
+                      patchLabel := ParamStr(idx);
+                  end;
+                8:{apply-checkin}
+                  doOnlyCheckinPatch := true;
               else
                 raise exception.Create('Unknown option:'+curParam);
               end;
         else
-          raise exception.Create('Unknown option'+curParam);
+          raise exception.Create('Unknown option: '+curParam);
         end;
       end;
       inc(idx);
@@ -545,6 +571,9 @@ begin
         ' /Z                   Garbage collect at end'#13#10+
         ' /M <branch>          Merge branch at end'#13#10+
         ' /S[+-]               Enable/disable signoff'#13#10+
+        ' --apply-patch {file} Apply patch to project'#13#10+
+        ' --apply-label {lab}  Label to apply patch to'#13#10+
+        ' --apply-checkin      Only checkin patch'#13#10+
         ' --trackusers         Load users from Track'#13#10+
         ' --push               Push all repos at end'#13#10+
         ' --dump <file>        Dump commits to file'#13#10+
@@ -586,13 +615,22 @@ begin
     Write('Finding root folder: ' + paramlist[2]);
     if paramlist.Count > 1 then
       collator.SetRootFolder(paramlist[2]);
-    Writeln('.');
-    collator.Tag := codetag;
-    collator.DiffSecs := DiffSecs;
-    collator.Command := Command;
+  finally
+    paramlist.Free;
+  end;
 
+  Writeln('.');
+  collator.Tag := codetag;
+  collator.DiffSecs := DiffSecs;
+  collator.Command := Command;
+
+  if doApplyPatch then
+  begin
+    collator.ApplyPatch(PatchFile, patchLabel, doOnlyCheckinPatch);
+  end
+  else
+  begin
     // Check if there are modifications to the repositories.
-
     if (OutputDir <> '') and doFetch and collator.CheckModifiedRepositories  then
       exit;
 
@@ -616,9 +654,8 @@ begin
       if doUpload then
         collator.Upload;
     end;
-  finally
-    paramlist.Free;
   end;
+
 end;
 
 { TTCCollator }
@@ -912,6 +949,7 @@ begin
 
 end;
 
+
 procedure ClearCheckoutInfo(choutinf: PCheckoutInfo);
 begin
   StrCopy(choutinf.Comments, '');
@@ -1059,7 +1097,7 @@ begin
   result := ExitCode;
 end;
 
-procedure TTCCollator.Git(cmd: array of string; return: TStrings = nil; echo: Boolean = true; GitPath : String = #0);
+function TTCCollator.Git(cmd: array of string; return: TStrings = nil; echo: Boolean = true; GitPath : String = #0) : integer;
 var
   gitcmd, s: string;
 begin
@@ -1077,7 +1115,7 @@ begin
   if GitPath= #0 then
     GitPath := OutputDir;
 
-  ExecCmd(GitPath, gitcmd, cmd, return, echo);
+  result := ExecCmd(GitPath, gitcmd, cmd, return, echo);
 end;
 
 function TTCCollator.HasTCRef( DirName : string = #0; oldRef : boolean = false): Boolean;
@@ -1813,21 +1851,21 @@ begin
   Git(['push', 'server', pushBranch], nil, cdoPush in FDebugOpts);
 end;
 
-function TTCCollator.getFileInfoForPath(const Filename: string): TFileInfo;
-  function getFolderInfo(ParentID: cardinal; const FolderName: String)
-    : TFolderInfo;
-  var
-    Folder: TPair<cardinal, TFolderInfo>;
-  begin
-    result := nil;
-    for Folder in FFolders do
-      if (Folder.Value.ParentID = ParentID) and (CompareText(Folder.Value.FolderName, FolderName) = 0) then
-      begin
-        result := Folder.Value;
-        break;
-      end;
-  end;
 
+function TTCCollator.getFolderInfo(ParentID: cardinal; const FolderName: String): TFolderInfo;
+var
+  Folder: TPair<cardinal, TFolderInfo>;
+begin
+  result := nil;
+  for Folder in FFolders do
+    if (Folder.Value.ParentID = ParentID) and (CompareText(Folder.Value.FolderName, FolderName) = 0) then
+    begin
+      result := Folder.Value;
+      break;
+    end;
+end;
+
+function TTCCollator.getFileInfoForPath(const Filename: string): TFileInfo;
 var
   dirpart, filepart, curdir: String;
   dirs: TStrings;
@@ -1870,6 +1908,7 @@ begin
   end;
 
 end;
+
 
 procedure TTCCollator.Upload;
   function GetSingle(outval: TStrings): string;
@@ -2842,9 +2881,7 @@ begin
   if FRootID = 0 then
     raise Exception.Create('Root Project/Folder has not been selected');
 
-  Write('Loading Files..');
-  VcsErrCvt(VcsEnumFiles(FRootID, LoadFilesList, @FFiles, true));
-  Writeln(IntToStr(FFiles.Count));
+  LoadFiles;
 
   AssignFolders;
 
@@ -2991,6 +3028,7 @@ begin
     end;
   end;
 end;
+
 
 procedure TTCCollator.AssignFolders;
 var
@@ -3514,6 +3552,386 @@ begin
       end;
     end;
   end;
+end;
+
+type
+TVersionLabelItem = class
+public
+  LabelType : Integer;
+  Name : String;
+  LabelID : Cardinal;  
+end;
+TVersionLabelList = TObjectList<TVersionLabelItem>;
+
+function ListLabels( Data: Pointer; LabelType: Integer; Name, Comments: String; ID: Cardinal; Timestamp: Integer ): Boolean;
+var
+  labelList : TVersionLabelList;
+  LabelItem : TVersionLabelItem;
+begin
+  labelList := TVersionLabelList(Data);
+  labelItem := TVersionLabelItem.Create;
+  labelItem.LabelType := LabelType;
+  labelItem.Name := Name;
+  labelItem.LabelID  := id;
+  labelList.Add(labelItem);
+  result := true;
+end;
+
+procedure ClearCheckinInfo(chininf : PCheckinInfo; comments : String = '');
+begin
+  StrCopy( chininf.Comments , PAnsiChar(AnsiString(comments)));
+  StrCopy(chininf.Extra,'');
+  chininf.VersionID := 0;
+  chininf.Flags := 0;
+end;
+
+type
+  TCheckinFileInfo = class(TObject)
+  public
+    FullPath : String;
+    checkout : boolean;
+    fileInf  : TFileInfo;
+  end;
+
+
+procedure TTCCollator.ApplyPatch(const PatchFile, patchLabel: String; checkinOnly : boolean);
+type
+  TStatParseState = (spsInit, spsNumAdd, spsAddSpace, spsNumDel, spsDelSpace);
+var
+  gitRet, newList, comment, rawFileList : TStrings;
+  fileList : TObjectList<TCheckinFileInfo>;
+  filepath, line, lockedby : String;
+  idx, curpos : integer;
+  fileID : Cardinal;
+  Modified, Timestamp, CompressedSize, RevisionCount, ShareCount, Status: Integer; 
+  IsVirtual, Frozen: Boolean;
+  curFile, chkFile : TCheckinFileInfo;
+  foundInf : TFileInfo;
+  coRevisionID: Cardinal;
+  choutinf: PCheckOutInfo;
+  chininf : PCheckInInfo;
+  hasBad, hasClean, founddup : boolean;
+  PF : TextFile;
+  foldInf : TFolderInfo;
+  groupExt : String;
+  versionList : TVersionLabelList;
+  versionItem : TVersionLabelItem;
+  versionLabelID : Cardinal;
+  parseState : TStatParseState;
+begin
+  if not FileExists(PatchFile) then
+  begin
+    Writeln('Patch File doesn''t exist: '+PatchFile);
+    exit;
+  end;
+  newList := nil;
+  fileLIst := nil;
+  comment := nil;
+  rawFileList := nil;
+  gitRet := TStringList.Create;
+  try
+    versionLabelID := 0;
+    if PatchLabel <> '' then
+    begin
+      versionList := TObjectList<TVersionLabelItem>.Create;
+      VcsEnumLabels( FProjID,0,lt_VersionLabel, ListLabels, Pointer(versionList));
+      for versionItem in versionList do
+        if CompareText(versionItem.Name, PatchLabel) = 0 then
+          versionLabelID := versionItem.LabelID;          
+      if versionLabelID = 0 then
+        WriteLn(Format('Version label ''%s'' not found',  [PatchLabel]));
+    end;   
+
+    
+    FileList := TObjectList<TCheckinFileInfo>.Create(true);
+    
+    LoadFiles;
+    AssignFolders;
+
+    
+    newList := TStringList.Create;
+    Git(['apply','--numstat', '--ignore-whitespace', '--', PatchFile],gitRet,false);
+
+    rawFileList := TSTringList.Create;
+
+    hasBad := false;
+    for line in gitRet do
+    begin
+      begin
+        curpos := 0;
+        parseState := spsInit;
+        for idx := 1 to length(line) do
+          case line[idx] of
+            '0'..'9':
+              case ParseState of
+                spsInit: ParseState := spsNumAdd;
+                spsNumAdd: ;
+                spsAddSpace: ParseState := spsNumDel;
+                spsNumDel: ;
+                spsDelSpace:
+                  begin
+                    curPos := idx;
+                    break;
+                  end;
+              end;
+            ' ',#9:
+              case ParseState of
+                spsInit:   break;
+                spsNumAdd: ParseState := spsAddSpace;
+                spsAddSpace: ;
+                spsNumDel: ParseState := spsDelSpace;
+                spsDelSpace: ;
+              end;
+          else
+            if ParseState = spsDelSpace then
+              curPos := idx;
+            break;
+          end;
+
+
+
+        if curPos > 0 then
+        begin
+          filepath := ReplaceStr(Trim(Copy(Line,curPos,length(line))), '/','\');
+          //filepath := Trim(Copy(Line,1,idx-1));
+          fileID := 0;
+          rawFileList.add(filepath);
+          VcsErrCvt(VcsGetFileGroupExt( filepath, groupExt ));
+          filepath := ChangeFileExt(filepath,groupext); 
+
+          foundInf := getFileInfoForPath(filepath);
+          if assigned(foundInf) then
+          begin
+            founddup := false;
+            for chkFile in fileList do
+              if chkFile.fileInf.ItemID = foundinf.ItemID then
+              begin
+                founddup := true;
+                break;
+              end;
+            if founddup then
+              continue; // Already handled
+          end;
+
+          curFile := TCheckinFileInfo.Create;
+          curFile.fileInf := foundinf;
+          if curFile.fileInf = nil then
+          begin
+            curFile.checkout := false;
+            WriteLn(format('%s is new and will need to be added', [filepath]));
+            newlist.Add(filepath);
+          end
+          else
+          begin
+            curFile.checkout := true;
+            VcsErrCvt(VcsFileStatus(curFile.fileInf.ParentID, curFile.fileInf.ItemID, filepath,lockedBy,  
+              Modified, Timestamp, CompressedSize, RevisionCount, ShareCount, Status,
+              IsVirtual, Frozen));
+            curFile.FullPath := filepath;
+            
+            if Status and (VCS_STATUS_OUTOTHER  or VCS_STATUS_OUTBYUSER)  <> 0 then
+            begin
+              Writeln(format('%s is already locked by %s',[filepath, lockedBy]));
+              hasBad := true;
+            end
+            else if not checkinOnly then
+            begin
+              if (Status and VCS_STATUS_MODIFIED) <> 0 then
+              begin
+                Writeln(format('%s has been modified',[filepath]));
+                hasBad := true;
+              end
+              else if (Status and VCS_STATUS_CHECKEDOUT) <> 0 then
+              begin
+                if (Status and VCS_STATUS_OUTOFDATE) <> 0 then
+                begin
+                  WRiteln(format('%s is checked out to current path but is out of date',[filepath]));
+                  hasBad := true;
+                end;
+                curFile.checkout := false;            
+              end;
+            end;
+            fileList.Add(curFile);
+          end;
+
+        end;
+      end;
+    end;
+    if hasBad then
+      exit;
+    if not checkinOnly then
+    begin
+      // Checkout all the files.
+      choutinf := InitializeCheckOutInfo;
+      try
+        for curfile in filelist do
+        begin
+          if curfile.checkout then
+          begin
+            // Check out a file from TC
+
+            ClearCheckoutInfo(choutinf);
+
+            choutinf.Lock := true;
+            choutinf.Overwrite := true;
+            choutinf.Flags := co_LeaveWorkfileWritable;
+
+            VcsErrCvt(VcsCheckOutFileEx(curFile.fileinf.ItemID, coRevisionID, choutinf, curFile.FullPath));
+          end;
+        end;
+      finally
+        ReleaseCheckOutInfo(choutinf);
+      end;
+      WRiteLn('Applying Patch');
+      // Apply the patch
+      Git(['apply', '--ignore-whitespace', '--reject', '--', PatchFile],gitRet,false);
+      for line in gitRet do
+      begin
+        if StartsText('failed:', line) then
+          hasBad := true
+        else if PosEx( 'applied cleanly', line ) >= 1 then
+          hasClean := true;
+      end;
+
+      if hasBad then
+      begin
+        for line in gitRet do
+          WriteLn(line);
+      end;
+        
+    end;
+
+    comment := TStringList.Create;
+    // Extract the header
+    AssignFile(pf, PatchFile);
+    Reset(pf);
+    try
+      while not Eof(pf) do
+      begin
+        ReadLn(pf, line);
+        if StartsText('Subject:',line) then
+        begin
+          Line := Trim(copy(line,9,length(line)));
+          if StartsText('[', line) then
+          begin
+            idx := PosEx(']',line,2);
+            if idx > 0 then
+              line := TrimLeft(Copy(line, idx+1, length(line)));
+          end;
+          Comment.Add(line);
+          break;
+        end;
+      end;
+      while not EOF(pf) do
+      begin
+        ReadLn(pf, line);
+        if line = '---' then
+          break;
+        if StartsText('Signed-off-by:',TrimLeft(line)) then
+        begin
+
+          if (comment.count > 1) and (comment[comment.Count-1] = '') then
+            comment.Delete(comment.count-1);
+          break;
+        end;
+        comment.Add(line);
+      end;
+      if (comment.Count > 2)  and (comment[1] <> '') then
+        comment.Insert(1,'');
+
+    finally
+      CloseFile(pf);
+    end;
+    writeln('------Modified Files-------');
+    for line in rawFileList do
+    begin
+      writeln(line);
+    end;
+
+    writeln('-------------');
+    for line in comment do
+      WriteLn(line);
+    writeln('-------------');
+
+    // Then check-in the changes.
+    repeat
+      Write(Format('Check-in changes to %d files? [y|n|u] ', [ fileList.Count + newList.Count]));
+      Readln(line);
+    until IndexText(line,['y','n','u']) >= 0;
+    case IndexText(line,['y','n','u']) of
+      0: ;
+      1:
+        begin
+          WriteLn('Aborting');    
+          exit;
+        end;
+      2:
+        begin
+          WriteLn('Unlock');
+          for curFile in FileLIst do
+          begin
+            try
+              VcsErrCvt(VcsUncheckOutFile(curFile.fileInf.ItemID));
+            except
+              on E: Exception do
+                Writeln('Uncheckout Error: '+E.message);
+            end;
+          end;
+          exit;
+        end;
+    end;    
+    
+    // Checkin all the files.
+    chIninf := InitializeCheckInInfo;
+    try
+      ClearCheckInInfo(chIninf, comment.Text);
+      for curfile in filelist do
+      begin
+        // Check in a file to TC
+        if Assigned(curfile.fileInf) then
+        begin
+          FileId := curFile.fileinf.ItemID;
+
+          VcsErrCvt(VcsCheckInFile( 0, 0, FileID, coRevisionID, '', chininf));
+          if versionLabelID <> 0 then
+            VcsErrCvt(VcsAttachVersionLabel(FileID, coRevisionID,versionLabelID, true ));
+        end;
+      end;
+       // Add files
+      for line in newList do
+      begin
+        filepath := ExtractFileDir(line);
+        foldInf := getFolderInfo(FRootID, filepath);
+        if foldInf = nil then
+          Writeln(format('%s : Unable to find folder ''%s''', [line, filepath]))
+        else
+        begin
+          fileId := 0;
+          VcsErrCvt(VcsCheckInFile( FProjID, foldInf.FolderID, FileID, coRevisionID,
+            IncludeTrailingPathDelimiter(FOutputDir)+line, chininf));
+          if versionLabelID <> 0 then
+            VcsErrCvt(VcsAttachVersionLabel(FileID, coRevisionID,versionLabelID, true ));
+        end;
+      end;
+    finally
+      ReleaseCheckInInfo(chIninf);
+    end;  
+
+  finally
+    gitRet.Free;
+    FileList.Free;
+    newList.Free;
+    comment.Free;
+    rawFileList.Free;
+  end;
+
+ end;
+
+procedure TTCCollator.LoadFiles;
+begin
+  Write('Loading Files..');
+  VcsErrCvt(VcsEnumFiles(FRootID, LoadFilesList, @FFiles, true));
+  Writeln(IntToStr(FFiles.Count));
 end;
 
 { TCheckinGroup }
