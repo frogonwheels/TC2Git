@@ -1238,7 +1238,7 @@ begin
     end;
     Git(['commit','-m','git2tc setup'], nil, cdoInit in FDebugOpts, path);
     // Create the branch, now there is a commit to add
-    Git(['checkout', '-b', TCTag, nil, cdoInit in FDebugOpts, path);
+    Git(['checkout', '-b', TCTag], nil, cdoInit in FDebugOpts, path);
   end;
 end;
 
