@@ -122,6 +122,7 @@ type
     procedure CollateCheckins;
     procedure GetAuthorsFilename(var fname: string);
     procedure DoDump(var F: Text);
+    procedure LoadFiles;
   protected
     FConnection, FUsername, FPassword : String;
     FProjects: TProjectList;
@@ -188,7 +189,7 @@ type
       @param echo  True to echo response to stdout
       @param GitPath  The alternate path to the git repository (or #0 to leave default)
     }
-    procedure Git(cmd: array of string; return: TStrings = nil; echo: Boolean = true; GitPath : String = #0);
+    function Git(cmd: array of string; return: TStrings = nil; echo: Boolean = true; GitPath : String = #0) : integer;
     {: Prune all the revision found in the GIT comments from being extracted.
     }
     procedure PruneDir( const Path : String);
@@ -377,9 +378,12 @@ var
   curPrompt : TPromptMode;
   promptlist: TStringList;
   doUpload: Boolean;
+  doApplyPatch : Boolean;
+  doOnlyCheckinPatch : boolean;
   found : boolean;
   doFetch : boolean;
   dumpFile : String;
+  patchFile, patchLabel : string;
 begin
   paramlist := TStringList.Create;
   try
@@ -1522,6 +1526,7 @@ begin
         end;
       end;
 
+      // Override the dates, name and email using enviornment variables
       gitDate := FormatDateTime('yyyy-mm-dd hh:nn:ss', checkin.LabelDate);
       SetEnvironmentVariable('GIT_AUTHOR_DATE', PChar(gitDate));
       SetEnvironmentVariable('GIT_COMMITTER_DATE', PChar(gitDate));
@@ -1537,12 +1542,14 @@ begin
         SetEnvironmentVariable('GIT_COMMITTER_EMAIL', PChar(email));
       end;
 
+      // Go through the files for a commit.
       SubmoduleCommits.Clear;
       mainModuleRefs.Clear;
       choutinf := InitializeCheckOutInfo;
       try
         if cdoFileGet in FDebugOpts then
           Writeln('Files:');
+
         for revision in checkin.Revisions do
         begin
           basepath := GetPathToRoot(revision.FileInf.ParentID);
@@ -1553,10 +1560,13 @@ begin
           revid := AnsiString(revision.RevisionName);
 
           outDir := IncludeTrailingPathDelimiter(FOutputDir);
-          // Check for a sub-module
+
+          // Get sub-module information
           case IsSubmodule(basepath, SubmoduleRoot, SubModulePath, true) of
             stSubmodule:
             begin
+              // Submodule - commit to the submodule path
+              // .. and commit submodule changes to main repository.
               outDir := IncludeTrailingPathDelimiter(outdir+SubModuleRoot);
               submoduleRoot := ExcludeTrailingPathDelimiter(SubmoduleRoot);
               if not SubmoduleCommits.TryGetValue(subModuleRoot,curSubmodCommit) then
@@ -1569,6 +1579,7 @@ begin
             end;
             stExtract:
             begin
+              // Extract - to a path outside  the main repository
               if (submoduleRoot <> '') and (submoduleRoot[1] <> '.') then
                 outDir := SubModuleRoot
               else
@@ -1588,8 +1599,8 @@ begin
 
           filepath := (outDir + basepath);
 
+          // Checkout, don't lock - leaving writable.
           ClearCheckoutInfo(choutinf);
-
           choutinf.Lock := false;
           choutinf.Overwrite := true;
           choutinf.Flags := co_LeaveWorkfileWritable or co_IgnoreLocked;
@@ -1631,6 +1642,7 @@ begin
           if not Prompt(pmFile) then
             raise Exception.Create('User Aborted');
 
+          // In TC a single file can be a group of files to check in.
           exts := '';
           try
             VcsErrCvt(VcsGetFileGroupExtensions(
@@ -1644,6 +1656,7 @@ begin
                  [gitName, revision.FileInf.ItemID, revision.RevisionName,E.message]));
             end;
           end;
+          // Add this file to the references list for the commit comment.
           curModuleRefs.Add(Format('%uv%s:%s', [revision.FileInf.ItemID,
               revision.RevisionName, revision.FileInf.Filename]));
 
