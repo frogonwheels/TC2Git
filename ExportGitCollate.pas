@@ -213,7 +213,7 @@ type
 
     {: Traverse folders and files to find the TC information for the specified file.
     }
-    function getFileInfoForPath(const Filename: string): TFileInfo;
+    function getFileInfoForPath(const Filename: string; addMissing : boolean = false): TFileInfo;
     {: Traverse folders to find the TC info for the specified folder
     }
     function getFolderInfo(ParentID: cardinal; const FolderName: String) : TFolderInfo;
@@ -338,6 +338,10 @@ procedure WritePercent(curcount, totalCount: longint; var lastProg: integer); fo
 function IsBranchRevision( revision : String) : boolean; forward;
 function IsParentOf(childRev, parentRev: String): Boolean; forward;
 procedure StripFileMacros(Filename: String); forward;
+function LoadFilesList(Data: Pointer; Name, LocalPath, LockedBy: String;
+  ID, ParentID, AncestorID: Cardinal; Modified, Timestamp, CompressedSize,
+  RevisionCount, ShareCount, Status: integer;
+  IsVirtual, Frozen: Boolean): Boolean; forward;
 
 procedure VcsErrCvt( Res : integer; Extra : String = '');
 begin
@@ -1865,14 +1869,35 @@ begin
     end;
 end;
 
-function TTCCollator.getFileInfoForPath(const Filename: string): TFileInfo;
+function TTCCollator.getFileInfoForPath(const Filename: string; addMissing : boolean = false): TFileInfo;
+var
+  foundFolder : boolean;
+  function FindFile(parentID : cardinal; const filepart : string) : TFileInfo;
+  var
+    curFile: TFileInfo;
+  begin
+    result := nil;
+    for curFile in FFiles do
+    begin
+      if (curFile.ParentID = parentID) then
+      begin
+        foundFolder := true;
+        If (CompareText(curFile.Filename, filepart) = 0) then
+        begin
+          result := curFile;
+          break;
+        end;
+      end;
+    end;
+  end;
 var
   dirpart, filepart, curdir: String;
   dirs: TStrings;
   curParent: Cardinal;
   curFolder: TFolderInfo;
-  curFile: TFileInfo;
+
 begin
+  foundFolder := false;
   result := nil;
   filepart := ExtractFileName(Filename);
   dirpart := ExtractFileDir(Filename);
@@ -1892,15 +1917,12 @@ begin
 
       curParent := curFolder.FolderID;
     end;
+    result := FindFile(curParent, filePart);
 
-    for curFile in FFiles do
+    if not assigned(result) and addmissing and not foundFolder then
     begin
-      if (curFile.ParentID = curParent) and (CompareText(curFile.Filename,
-          filepart) = 0) then
-      begin
-        result := curFile;
-        break;
-      end;
+      VcsErrCvt(VcsEnumFiles(curParent, LoadFilesList, @FFiles, false));
+      result := FindFile(curParent, filePart);
     end;
 
   finally
@@ -3559,7 +3581,7 @@ TVersionLabelItem = class
 public
   LabelType : Integer;
   Name : String;
-  LabelID : Cardinal;  
+  LabelID : Cardinal;
 end;
 TVersionLabelList = TObjectList<TVersionLabelItem>;
 
@@ -3652,13 +3674,10 @@ begin
         WriteLn(Format('Version label ''%s'' not found',  [PatchLabel]));
     end;
 
-    
     FileList := TObjectList<TCheckinFileInfo>.Create(true);
-    
-    LoadFiles;
-    AssignFolders;
+    Writeln('Loading Folder list');
+    LoadFolders;
     WriteLn('Parsing Patch:');
-
     newList := TStringList.Create;
     Git(['apply','--numstat', '--ignore-whitespace', '--', fullPatchPath],gitRet,false);
 
@@ -3709,7 +3728,8 @@ begin
           VcsErrCvt(VcsGetFileGroupExt( IncludeTrailingPathDelimiter(FOutputDir)+filepath, groupExt ));
           filepath := ChangeFileExt(filepath,groupext);
 
-          foundInf := getFileInfoForPath(filepath);
+          foundInf := getFileInfoForPath(filepath, true);
+
           if assigned(foundInf) then
           begin
             // Check if this group is already handled
