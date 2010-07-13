@@ -174,7 +174,7 @@ type
     function GetPathToRoot(FolderID: Cardinal; mapped :boolean = true): string;
     //: Get the sign-off string for the author.
     function GetSignOff(const Author: String): String;
-    //: The Tag used in Git to reference the last version extracted from TC 
+    //: The Tag used in Git to reference the last version extracted from TC
     function TCTag: string;
     function TCTagOld: string;
 
@@ -1359,6 +1359,14 @@ begin
   end;
 end;
 
+function Esses( count : Integer; singular : string = ''; plural : string = 's') : string;
+begin
+  if count = 1 then
+    result := singular
+  else
+    result := plural;
+end;
+
 // convert a binary dfm file to a text dfm file : Delphidabbler.com
 function Dfm2Txt(Src, Dest: string): Boolean;
 var
@@ -1544,7 +1552,7 @@ begin
     end;
 
     totalCount := FCheckins.Count;
-    Writeln(Format('Importing %d commits into repository at %s.', [totalCount,FOutputDir]));
+    Writeln(Format('Importing %d commit%s into repository at %s.', [totalCount,Esses(totalCount),FOutputDir]));
     curPos := 0;
     lastProg := -1;
     progcount := 0;
@@ -1614,7 +1622,7 @@ begin
         idy := PosEx('>', signoff,idx+1);
         if idy = 0 then
           idy := length(signoff)+1;
-        email := trim(Copy(signoff,idx+1, idy-(idx+1))); 
+        email := trim(Copy(signoff,idx+1, idy-(idx+1)));
         SetEnvironmentVariable('GIT_COMMITTER_NAME', PChar(userName));
         SetEnvironmentVariable('GIT_COMMITTER_EMAIL', PChar(email));
       end;
@@ -1834,8 +1842,8 @@ begin
     procTime := procTime div 60;
     prcMins  := procTime mod 60;
     procHrs := procTime div 60;
-    WriteLn(Format('Processing Time: %d hrs %d mins %d secs',
-      [procHrs, prcMins, prcSecs]));
+    WriteLn(Format('Processing Time: %d hr%s %d min%s %d sec%s for %d commit%s',
+      [procHrs, Esses(procHrs), prcMins, Esses(prcMins), prcSecs, Esses(prcSecs), totalCount, Esses(totalCount) ]));
     GitAllProjects(['repack'], 'Repack: %s', true);
     GitAllProjects(['prune-packed'], 'Prune: %s', true);
     //
@@ -3768,7 +3776,7 @@ begin
 
           foundInf := getFileInfoForPath(filepath, true);
 
-          if assigned(foundInf) then
+          if not assigned(foundInf) then
           begin
             // Check if this group is already handled
             founddup := false;
