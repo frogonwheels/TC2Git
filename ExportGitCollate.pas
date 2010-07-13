@@ -190,6 +190,11 @@ type
       @param GitPath  The alternate path to the git repository (or #0 to leave default)
     }
     function Git(cmd: array of string; return: TStrings = nil; echo: Boolean = true; GitPath : String = #0) : integer;
+
+    {: Get the current branch for the path.
+    }
+    function GitCurrentBranch( GitPath : String = #0) : String;
+
     {: Prune all the revision found in the GIT comments from being extracted.
     }
     procedure PruneDir( const Path : String);
@@ -1122,6 +1127,28 @@ begin
   result := ExecCmd(GitPath, gitcmd, cmd, return, echo);
 end;
 
+{ Get the current branch for the path.
+}
+function TTCCollator.GitCurrentBranch( GitPath : String = #0) : String;
+var
+  retvals : TStrings;
+  branch : String;
+begin
+  result := '';
+  retVals := TStringList.Create;
+  try
+    Git(['branch'], retVals, false, GitPath);
+    for branch in retvals do
+      if (length(branch) > 0) and (branch[1] = '*') then
+      begin
+        result := Copy(branch, 3,length(branch)-2);
+        break;
+      end;
+  finally
+    retvals.Free;
+  end;
+end;
+
 function TTCCollator.HasTCRef( DirName : string = #0; oldRef : boolean = false): Boolean;
 begin
   if DirName = #0 then
@@ -1456,7 +1483,7 @@ var
   hasSubmoduleCommit : boolean;
   submodule : TPair<String, TSubmoduleInf>;
   smoddir : string;
-  stripfile: string;
+  stripfile, curBranch: string;
 begin
   LoadAuthors;
   commitName := IncludeTrailingPathDelimiter(FOutputDir) + 'commit.$$$';
@@ -1476,14 +1503,19 @@ begin
     ForceDirectories(FOutputDir);
 
     InitGit;
-    if HasTCRef then
-      Git(['checkout', TCTag])
-    else
+    curBranch := GitCurrentBranch;
+    if curBranch <> TCTag then
     begin
-      if HasTCRef(#0,true) then
-        Git(['checkout', TCTagOld]);
-      Git(['checkout', '-b', TCTag]);
+      if HasTCRef then
+        Git(['checkout', TCTag])
+      else
+      begin
+        if HasTCRef(#0,true) and (curBranch <> TCTagOld) then
+          Git(['checkout', TCTagOld]);
+        Git(['checkout', '-b', TCTag]);
+      end;
     end;
+
     for submodule in FSubmoduleMaps do
     begin
       if submodule.Value.IsSubmodule then
@@ -1496,16 +1528,19 @@ begin
         if (smoddir <> '') and (smoddir[1] = '.') then
           smoddir := IncludeTrailingPathDelimiter(FOutputDir)+ smoddir; // Relative
       end;
-      if HasTCRef(smoddir) then
-        Git(['checkout', TCTag],nil,true,smoddir)
-      else
+      curBranch := GitCurrentBranch(smoddir);
+      if curBranch  <> TCTag then
       begin
-        if HasTCRef(smoddir, true) then
-          Git(['checkout', TCTagOld],nil,true,smoddir);
-
-        Git(['checkout', '-b', TCTag],nil,true,smoddir);
+        Writeln(Format('Checkout branch %s for %s',[TCTag, smoddir]));
+        if HasTCRef(smoddir) then
+          Git(['checkout', TCTag],nil,true,smoddir)
+        else
+        begin
+          if HasTCRef(smoddir, true) and (curBranch <> TCTagOld) then
+            Git(['checkout', TCTagOld],nil,true,smoddir);
+          Git(['checkout', '-b', TCTag],nil,true,smoddir);
+        end;
       end;
-
     end;
 
     totalCount := FCheckins.Count;
