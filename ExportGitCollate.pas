@@ -3598,12 +3598,12 @@ procedure TTCCollator.ApplyPatch(const PatchFile, patchLabel: String; checkinOnl
 type
   TStatParseState = (spsInit, spsNumAdd, spsAddSpace, spsNumDel, spsDelSpace);
 var
-  gitRet, newList, comment, rawFileList : TStrings;
+  gitRet, newList, comment, rawFileList, folderSplit : TStrings;
   fileList : TObjectList<TCheckinFileInfo>;
-  filepath, line, lockedby : String;
+  filepath, line, lockedby, filename : String;
   idx, curpos : integer;
-  fileID : Cardinal;
-  Modified, Timestamp, CompressedSize, RevisionCount, ShareCount, Status: Integer; 
+  folderId, fileID : Cardinal;
+  Modified, Timestamp, CompressedSize, RevisionCount, ShareCount, Status: Integer;
   IsVirtual, Frozen: Boolean;
   curFile, chkFile : TCheckinFileInfo;
   foundInf : TFileInfo;
@@ -3613,21 +3613,31 @@ var
   hasBad, hasClean, founddup : boolean;
   PF : TextFile;
   foldInf : TFolderInfo;
-  groupExt : String;
+  groupExt, labelMsg : String;
   versionList : TVersionLabelList;
   versionItem : TVersionLabelItem;
   versionLabelID : Cardinal;
   parseState : TStatParseState;
+  fullPatchPath : String;
+  tcpath : String;
+  localFolder: string;
+  ignFoldCount: Integer;
+  ignFileCount: Integer;
+  folderPath: String;
 begin
   if not FileExists(PatchFile) then
   begin
     Writeln('Patch File doesn''t exist: '+PatchFile);
     exit;
   end;
+  // Need to get the full path.
+  fullPatchPath := ExpandFilename(patchFile);
+
   newList := nil;
   fileLIst := nil;
   comment := nil;
   rawFileList := nil;
+  folderSplit := nil;
   gitRet := TStringList.Create;
   try
     versionLabelID := 0;
@@ -3637,20 +3647,20 @@ begin
       VcsEnumLabels( FProjID,0,lt_VersionLabel, ListLabels, Pointer(versionList));
       for versionItem in versionList do
         if CompareText(versionItem.Name, PatchLabel) = 0 then
-          versionLabelID := versionItem.LabelID;          
+          versionLabelID := versionItem.LabelID;
       if versionLabelID = 0 then
         WriteLn(Format('Version label ''%s'' not found',  [PatchLabel]));
-    end;   
+    end;
 
     
     FileList := TObjectList<TCheckinFileInfo>.Create(true);
     
     LoadFiles;
     AssignFolders;
+    WriteLn('Parsing Patch:');
 
-    
     newList := TStringList.Create;
-    Git(['apply','--numstat', '--ignore-whitespace', '--', PatchFile],gitRet,false);
+    Git(['apply','--numstat', '--ignore-whitespace', '--', fullPatchPath],gitRet,false);
 
     rawFileList := TSTringList.Create;
 
@@ -3661,6 +3671,7 @@ begin
         curpos := 0;
         parseState := spsInit;
         for idx := 1 to length(line) do
+        begin
           case line[idx] of
             '0'..'9':
               case ParseState of
@@ -3687,21 +3698,37 @@ begin
               curPos := idx;
             break;
           end;
-
-
+        end;
 
         if curPos > 0 then
         begin
           filepath := ReplaceStr(Trim(Copy(Line,curPos,length(line))), '/','\');
-          //filepath := Trim(Copy(Line,1,idx-1));
+
           fileID := 0;
           rawFileList.add(filepath);
-          VcsErrCvt(VcsGetFileGroupExt( filepath, groupExt ));
-          filepath := ChangeFileExt(filepath,groupext); 
+          VcsErrCvt(VcsGetFileGroupExt( IncludeTrailingPathDelimiter(FOutputDir)+filepath, groupExt ));
+          filepath := ChangeFileExt(filepath,groupext);
 
           foundInf := getFileInfoForPath(filepath);
           if assigned(foundInf) then
           begin
+            // Check if this group is already handled
+            founddup := false;
+            for filename in newList do
+              if filename = filePath then
+              begin
+                founddup := true;
+                break;
+              end;
+            if founddup then
+              continue; // Already handled
+            // Add to list.
+            WriteLn(format('%s is new and will need to be added', [filepath]));
+            newlist.Add(filepath);
+          end
+          else
+          begin
+            // Check if this group of files is already handled.
             founddup := false;
             for chkFile in fileList do
               if chkFile.fileInf.ItemID = foundinf.ItemID then
@@ -3711,47 +3738,47 @@ begin
               end;
             if founddup then
               continue; // Already handled
-          end;
 
-          curFile := TCheckinFileInfo.Create;
-          curFile.fileInf := foundinf;
-          if curFile.fileInf = nil then
-          begin
-            curFile.checkout := false;
-            WriteLn(format('%s is new and will need to be added', [filepath]));
-            newlist.Add(filepath);
-          end
-          else
-          begin
-            curFile.checkout := true;
-            VcsErrCvt(VcsFileStatus(curFile.fileInf.ParentID, curFile.fileInf.ItemID, filepath,lockedBy,  
+            // Check the current status of the file.
+
+            VcsErrCvt(VcsFileStatus(foundinf.ParentID, foundinf.ItemID, filepath,lockedBy,
               Modified, Timestamp, CompressedSize, RevisionCount, ShareCount, Status,
               IsVirtual, Frozen));
-            curFile.FullPath := filepath;
-            
-            if Status and (VCS_STATUS_OUTOTHER  or VCS_STATUS_OUTBYUSER)  <> 0 then
-            begin
-              Writeln(format('%s is already locked by %s',[filepath, lockedBy]));
-              hasBad := true;
-            end
-            else if not checkinOnly then
-            begin
-              if (Status and VCS_STATUS_MODIFIED) <> 0 then
+
+            curFile := TCheckinFileInfo.Create;
+            try
+              curFile.checkout := true;
+              curFile.fileInf := foundinf;
+              // Filepath is modified by VcsFileStatus to be the full path
+              curFile.FullPath := filepath;
+
+              if Status and (VCS_STATUS_OUTOTHER  or VCS_STATUS_OUTBYUSER)  <> 0 then
               begin
-                Writeln(format('%s has been modified',[filepath]));
+                Writeln(format('%s is already locked by %s',[filepath, lockedBy]));
                 hasBad := true;
               end
-              else if (Status and VCS_STATUS_CHECKEDOUT) <> 0 then
+              else if not checkinOnly then
               begin
-                if (Status and VCS_STATUS_OUTOFDATE) <> 0 then
+                if (Status and VCS_STATUS_MODIFIED) <> 0 then
                 begin
-                  WRiteln(format('%s is checked out to current path but is out of date',[filepath]));
+                  Writeln(format('%s has been modified',[filepath]));
                   hasBad := true;
+                end
+                else if (Status and VCS_STATUS_CHECKEDOUT) <> 0 then
+                begin
+                  if (Status and VCS_STATUS_OUTOFDATE) <> 0 then
+                  begin
+                    WRiteln(format('%s is checked out to current path but is out of date',[filepath]));
+                    hasBad := true;
+                  end;
+                  curFile.checkout := false;
                 end;
-                curFile.checkout := false;            
               end;
+              fileList.Add(curFile);
+              curFile := nil;
+            finally
+              FreeAndNil(curfile);
             end;
-            fileList.Add(curFile);
           end;
 
         end;
@@ -3784,7 +3811,7 @@ begin
       end;
       WRiteLn('Applying Patch');
       // Apply the patch
-      Git(['apply', '--ignore-whitespace', '--reject', '--', PatchFile],gitRet,false);
+      Git(['apply', '--ignore-whitespace', '--reject', '--', fullPatchPath],gitRet,false);
       for line in gitRet do
       begin
         if StartsText('failed:', line) then
@@ -3798,12 +3825,12 @@ begin
         for line in gitRet do
           WriteLn(line);
       end;
-        
+
     end;
 
     comment := TStringList.Create;
     // Extract the header
-    AssignFile(pf, PatchFile);
+    AssignFile(pf, fullPatchPath);
     Reset(pf);
     try
       while not Eof(pf) do
@@ -3847,11 +3874,28 @@ begin
     begin
       writeln(line);
     end;
-
+    labelMsg := '';
+    if PatchLabel <> '' then
+      labelMsg := ' to '+PatchLabel;
+    if filelist.count > 0 then
+    begin
+      writeln(Format('------%d File Groups to commit%s-------',[filelist.count, labelMsg]));
+      for curfile in filelist do
+        writeln(curfile.FullPath);
+    end;
+    if newlist.Count > 0 then
+    begin
+      writeln(format('------%d File Groups to add%s-------',[newlist.count, labelMsg]));
+      for filename in newList do
+        writeln(filename);
+    end;
     writeln('-------------');
     for line in comment do
       WriteLn(line);
     writeln('-------------');
+    if versionLabelID <> 0 then
+      WriteLn('Label: '+patchLabel);
+
 
     // Then check-in the changes.
     repeat
@@ -3862,7 +3906,7 @@ begin
       0: ;
       1:
         begin
-          WriteLn('Aborting');    
+          WriteLn('Aborting');
           exit;
         end;
       2:
@@ -3879,8 +3923,8 @@ begin
           end;
           exit;
         end;
-    end;    
-    
+    end;
+
     // Checkin all the files.
     chIninf := InitializeCheckInInfo;
     try
@@ -3892,30 +3936,84 @@ begin
         begin
           FileId := curFile.fileinf.ItemID;
 
+          Write('Checkin: '+ curFile.FullPath);
           VcsErrCvt(VcsCheckInFile( 0, 0, FileID, coRevisionID, '', chininf));
           if versionLabelID <> 0 then
+          begin
+            Write(' --> '+ patchLabel);
             VcsErrCvt(VcsAttachVersionLabel(FileID, coRevisionID,versionLabelID, true ));
+          end;
+          writeln('.');
         end;
       end;
-       // Add files
+       // Add all the files/folders
       for line in newList do
       begin
         filepath := ExtractFileDir(line);
         foldInf := getFolderInfo(FRootID, filepath);
-        if foldInf = nil then
-          Writeln(format('%s : Unable to find folder ''%s''', [line, filepath]))
+        if foldInf <> nil then
+          folderId := foldInf.FolderID
         else
         begin
+          FolderID := 0;
+          if not assigned(folderSplit) then
+            folderSplit := TStringList.Create
+          else
+            folderSplit.Clear;
+
+          repeat
+            filename := filepath;
+            // Last one gets created first.
+            folderSplit.Insert(0,ExtractFileName(filename));
+            filepath := ExtractFileDir(filename);
+            if filename = filepath then
+              break; // Didn't get anywhere - stop
+            if (filepath = '') or (CompareText(FOutputDir, filepath) = 0) then
+            begin
+              FolderID := FRootID;
+              break;
+            end;
+            foldInf := getFolderInfo(FRootID, filepath);
+            if Assigned(FoldInf) then
+            begin
+              // Found one
+              FolderID := FoldInf.FolderID;
+              break;
+            end;
+          until false;
+
+          // Construct the folders.
+          for filename in folderSplit do
+          begin
+            if folderID = 0 then
+              break;
+            Write('Create Folder: '+filename);
+            VcsErrCvt(VcsAddFolder(folderID{new}, folderID {original},filename,''));
+            Writeln('.');
+          end;
+        end;
+        if folderId = 0 then
+           { TODO -oMRG : Create the folder }
+          Writeln(format('%s : Unable to find folder for ''%s''', [line, line]))
+        else
+        begin
+          // Check in the new file (group) to the folder
           fileId := 0;
-          VcsErrCvt(VcsCheckInFile( FProjID, foldInf.FolderID, FileID, coRevisionID,
+          Write('Add: '+ curFile.FullPath);
+          VcsErrCvt(VcsCheckInFile( FProjID, folderID, FileID, coRevisionID,
             IncludeTrailingPathDelimiter(FOutputDir)+line, chininf));
+
+          // Attach the version label.
           if versionLabelID <> 0 then
+          begin
+            Write(' --> '+ patchLabel);
             VcsErrCvt(VcsAttachVersionLabel(FileID, coRevisionID,versionLabelID, true ));
+          end;
         end;
       end;
     finally
       ReleaseCheckInInfo(chIninf);
-    end;  
+    end;
 
   finally
     gitRet.Free;
@@ -3923,6 +4021,7 @@ begin
     newList.Free;
     comment.Free;
     rawFileList.Free;
+    folderSplit.Free;
   end;
 
  end;
