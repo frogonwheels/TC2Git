@@ -2534,22 +2534,25 @@ begin
     // Revisions in order from newest to oldest
     for rev in curFile.Revisions do
     begin
-      if assigned(lrev) and (rev.Date > lrev.Date) then
+      if rev.required then
       begin
-        Writeln;
-        Writeln('File: ' + curFile.Folder.TCPath + '/' + curFile.Filename);
-        Writeln('Revision: ' + lrev.RevisionName + ' has date ' + FormatDateTime
-            ('dd/mm/yyyy hh:nn', lrev.Date));
-        Writeln('Revision: ' + rev.RevisionName + ' has date ' + FormatDateTime
-            ('dd/mm/yyyy hh:nn', rev.Date));
-        daysbtwn := DaysBetween(rev.Date, lrev.Date);
-        if daysbtwn > 365 then
+        if assigned(lrev) and (rev.Date > lrev.Date) then
         begin
-          rev.SortDate := lrev.Date-1;
+          Writeln;
+          Writeln('File: ' + curFile.Folder.TCPath + '/' + curFile.Filename);
+          Writeln('Revision: ' + lrev.RevisionName + ' has date ' + FormatDateTime
+              ('dd/mm/yyyy hh:nn', lrev.Date));
+          Writeln('Revision: ' + rev.RevisionName + ' has date ' + FormatDateTime
+              ('dd/mm/yyyy hh:nn', rev.Date));
+          daysbtwn := DaysBetween(rev.Date, lrev.Date);
+          if daysbtwn > 365 then
+          begin
+            rev.SortDate := lrev.Date-1;
+          end;
+          result := false;
         end;
-        result := false;
+        lrev := rev;
       end;
-      lrev := rev;
     end;
 
     WritePercent(idx, totalProg, lastProg);
@@ -2959,9 +2962,9 @@ begin
   end;
   Writeln('.');
 
-  CheckDates;
-
   Prune;
+
+  CheckDates;
 
   Write('Copy required revisions');
   for curFile in FFiles do
