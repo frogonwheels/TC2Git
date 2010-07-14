@@ -379,6 +379,16 @@ begin
   end;
 end;
 
+// TODO: Make this not show the password.
+function ReadPassword : String;
+var
+  passwd : String;
+begin
+  passwd := '';
+  ReadLn(Passwd);
+  result := passwd;
+end;
+
 procedure ExportMain;
 var
   idx: integer;
@@ -606,7 +616,7 @@ begin
     else
     begin
       Write('Password:');
-      ReadLn(Password);
+      Password := ReadPassword;
     end;
     if Connection = '' then
       Connection := 'Development';
