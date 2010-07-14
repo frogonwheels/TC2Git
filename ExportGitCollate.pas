@@ -4,7 +4,7 @@ interface
 
 uses TCDirectIntf, Generics.Collections, classes, TrkIntf;
 {$DEFINE GROUP_DEPENDS}
-
+//{$DEFINE FEAT_UPLOAD}
 type
   // A TC Folder
   TFolderInfo = class
@@ -260,8 +260,10 @@ type
     Procedure Dump; overload;
     //: Perform sync TC->GIT
     procedure Perform;
+{$IFDEF FEAT_UPLOAD}
     //: TODO Perform upload (GIT->TC)
     procedure Upload;
+{$ENDIF}
     //: Load Authors from file
     procedure LoadAuthors;
     //: Save authors to file
@@ -401,7 +403,9 @@ var
   Prompt: TPromptModes;
   curPrompt : TPromptMode;
   promptlist: TStringList;
+{$IFDEF FEAT_UPLOAD}  
   doUpload: Boolean;
+{$ENDIF}
   doApplyPatch : Boolean;
   doOnlyCheckinPatch : boolean;
   found : boolean;
@@ -412,7 +416,9 @@ begin
   paramlist := TStringList.Create;
   try
     collator := TTCCollator.Create;
+{$IFDEF FEAT_UPLOAD}
     doUpload := false;
+{$ENDIF}
     Connection := '';
     OutputDir := '';
     codetag := '';
@@ -508,7 +514,10 @@ begin
               collator.UseSignoff := true
             else
               collator.UseSignoff := curParam[3]= '-';
-          'U', 'u': doUpload := true;
+{$IFDEF FEAT_UPLOAD}
+          'U', 'u':       
+             doUpload := true;
+{$ENDIF}
           '@': // Read file of maps/exclusions
             begin
               inc(idx);
@@ -591,10 +600,10 @@ begin
         ' /M <branch>          Merge branch at end'#13#10+
         ' /S[+-]               Enable/disable signoff'#13#10+
         ' --apply-patch {file} Apply patch to project'#13#10+
-        ' --apply-label {lab}  Label to apply patch to'#13#10+
+        ' --apply-label {lab}  Label to attach to checked in files'#13#10+
         ' --apply-checkin      Only checkin patch'#13#10+
-        ' --trackusers         Load users from Track'#13#10+
-        ' --push               Push all repos at end'#13#10+
+//        ' --trackusers         Load users from Track'#13#10+
+        ' --push               Push all modified repositories at end'#13#10+
         ' --dump <file>        Dump commits to file'#13#10+
         ' --no-fetch           Don''t fetch from TC'#13#10+
         ' --strip-macro        Strip RCS expansions from file'#13#10 +
@@ -668,10 +677,11 @@ begin
     begin
       // Perform download from TC -> Local GIT
       collator.Perform;
-
+{$IFDEF FEAT_UPLOAD}
       // TODO: Perform upload.
       if doUpload then
         collator.Upload;
+{$ENDIF}
     end;
   end;
 
@@ -1984,7 +1994,7 @@ begin
 
 end;
 
-
+{$IFDEF FEAT_UPLOAD}
 procedure TTCCollator.Upload;
   function GetSingle(outval: TStrings): string;
   var
@@ -2176,6 +2186,7 @@ begin
     gitout.Free;
   end;
 end;
+{$ENDIF}
 
 function TTCCollator.Prompt(pm: TPromptMode): Boolean;
 var
