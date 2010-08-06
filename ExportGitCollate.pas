@@ -4032,11 +4032,13 @@ begin
       begin
         if StartsText('failed:', line) then
           hasBad := true
+        else if StartsText('error:', line) then
+          hasBad := true
         else if PosEx( 'applied cleanly', line ) >= 1 then
           hasClean := true;
       end;
 
-      if hasBad then
+      if true then// hasBad then
       begin
         for line in gitRet do
           WriteLn(line);
@@ -4111,7 +4113,8 @@ begin
     writeln('-------------');
     if versionLabelID <> 0 then
       WriteLn('Label: '+patchLabel);
-
+    if hasBad then
+      Writeln('Found errors');
 
     // Then check-in the changes.
     repeat
