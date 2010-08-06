@@ -1968,6 +1968,32 @@ begin
     end;
 end;
 
+type
+TFolderLoadData = record
+  FilesList : TFilesList;
+  FolderInfo : TFolderInfo
+end;
+PFolderLoadData = ^TFolderLoadData;
+
+function LoadFilesFolderList(Data: Pointer; Name, LocalPath, LockedBy: String;
+  ID, ParentID, AncestorID: Cardinal; Modified, Timestamp, CompressedSize,
+  RevisionCount, ShareCount, Status: integer;
+  IsVirtual, Frozen: Boolean): Boolean;
+var
+  pfd: PFolderLoadData;
+  finfo: TFileInfo;
+begin
+  pfd := PFolderLoadData(Data);
+  finfo := TFileInfo.Create;
+  finfo.Filename := Name;
+  finfo.ItemID := ID;
+  finfo.ParentID := ParentID;
+  if ParentId = pfd^.FolderInfo.FolderID then
+    finfo.Folder := pfd^.FolderInfo;
+  pfd^.FilesList.Add(finfo);
+  result := true;
+end;
+
 function TTCCollator.getFileInfoForPath(const Filename: string; addMissing : boolean = false): TFileInfo;
 var
   foundFolder : boolean;
@@ -1994,10 +2020,11 @@ var
   dirs: TStrings;
   curParent: Cardinal;
   curFolder: TFolderInfo;
-
+  enumData : TFolderLoadData;
 begin
   foundFolder := false;
   result := nil;
+  curFolder := nil;
   filepart := ExtractFileName(Filename);
   dirpart := ExtractFileDir(Filename);
   dirs := TStringList.Create;
@@ -2018,9 +2045,11 @@ begin
     end;
     result := FindFile(curParent, filePart);
 
-    if not assigned(result) and addmissing and not foundFolder then
+    if not assigned(result) and addmissing and not foundFolder and assigned(curFolder) then
     begin
-      VcsErrCvt(VcsEnumFiles(curParent, LoadFilesList, @FFiles, false));
+      enumData.FilesList := FFiles;
+      enumData.FolderInfo := curFolder;
+      VcsErrCvt(VcsEnumFiles(curParent, LoadFilesFolderList, @enumData, false));
       result := FindFile(curParent, filePart);
     end;
 
