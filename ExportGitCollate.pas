@@ -1272,7 +1272,8 @@ begin
             hasSubmodInit := true;
           end;
           ForceDirectories(Smoddir);
-          Git(['init'], nil, cdoInit in FDebugOpts, smoddir);
+          DoInitRepo(smoddir, false, isNew);
+          //Git(['init'], nil, cdoInit in FDebugOpts, smoddir);
           // Add the remote server to the submodule as 'server'
           Git(['remote', 'add', 'server', submodule.value.Repository], nil, cdoInit in FDebugOpts, smoddir);
           // Add the submodule. This should add it as a new submodule.
