@@ -155,6 +155,7 @@ type
     FUseTrackUsers: boolean;
     FPushAtEnd  : boolean;
     FIncludeBranches : boolean;
+    FAllowOrphan : boolean;
 
     function rDebug(opt : TCollateDebugOpts): boolean;
     procedure wDebug(opt : TCollateDebugOpts; NewVal: boolean);
@@ -211,6 +212,10 @@ type
     {: Return true if the required reference exists.
     }
     function HasTCRef( DirName : string = #0; oldRef : boolean = false): Boolean;
+
+    {: Return true if the reference exists.
+    }
+    function GitHasRef(RefName : String; Dirname : String = #0 ) : Boolean;
 
     {: Check for dates out of order.
     }
@@ -320,6 +325,8 @@ type
     property PushAtEnd: boolean read FPushAtEnd write FPushAtEnd;
     // : Should macros be stripped from files!
     property StripMacros: Boolean read FStripMacros write FStripMacros;
+    //: Create a orphan branch if Tag doesn't exist.
+    property AllowOrphan : Boolean read FAllowOrphan write FAllowOrphan;
 
   end;
 
@@ -547,7 +554,8 @@ begin
           '-','/':
               case IndexText( copy(curParam, 3,length(curParam)-2),
                 ['trackusers', 'push', 'dump', 'no-fetch', 'strip-macro',
-                 'strip-macros', 'apply-patch', 'apply-label', 'apply-checkin']) of
+                 'strip-macros', 'apply-patch', 'apply-label', 'apply-checkin',
+                 'allow-orphan']) of
                 0:{trackusers} collator.UseTrackUsers := true;
                 1:{push} collator.PushAtEnd := true;
                 2:{dump}
@@ -575,6 +583,8 @@ begin
                   end;
                 8:{apply-checkin}
                   doOnlyCheckinPatch := true;
+                9:{allow-orphan}
+                  collator.AllowOrphan := true;
               else
                 raise exception.Create('Unknown option:'+curParam);
               end;
@@ -612,6 +622,7 @@ begin
         '     path=-           Skip exports'#13#10 +
         '     path=>{url}      Specify path (after conversion) is a submodule url to be CREATED'#13#10+
         '     path=>>{path}    Specify path (after conversion) is extracted independently'#13#10+
+        ' --allow-orphan       If the tag doesn''t exist create an orphan repo'#13#10+
         ' /D <debug>{,<debug>} Debug options:'+DebugListStr(',')
         );
 
@@ -1214,6 +1225,29 @@ begin
     result := FileExists(IncludeTrailingPathDelimiter(  DirName)
         + '.git\refs\heads\' + IfThen(oldRef,TCTagOld,TCTag));
 end;
+//Return true if the reference exists.
+function TTCCollator.GitHasRef( RefName : String; Dirname : String = #0) : Boolean;
+var
+  strRet : TStrings;
+  check : String;
+begin
+
+  result := DirHasGit(DirName);
+  if result then
+  begin
+    strRet := TStringList.Create;
+    try
+      Git(['show-ref',RefName],strRet,false,DirName);
+      for check in strRet do
+        if Trim(Check) <> '' then
+          exit;
+      result := false;
+    finally
+      strRet.Free;
+    end;
+  end;
+end;
+
 
 function TTCCollator.DirHasGit(DirName : String = #0): Boolean;
 begin
@@ -1322,6 +1356,9 @@ begin
       result := false;
       exit;
     end;
+    if (FBranch <> '') and (FBranch <> 'master') then
+      // Change default path.
+      Git(['symbolic-ref','HEAD','refs/heads/'+FBranch], nil, cdoInit in FDebugOpts, path);
 
     isNew := true;
     gitignore := IncludeTrailingPathDelimiter(Path) + '.gitignore';
@@ -1437,6 +1474,7 @@ begin
   DestS := TFileStream.Create(Dest, fmCreate);
   try
     ObjectResourceToText(SrcS, DestS);
+
     if FileExists(Src) and FileExists(Dest) then
       result := true
     else
@@ -1547,7 +1585,8 @@ var
   hasSubmoduleCommit : boolean;
   submodule : TPair<String, TSubmoduleInf>;
   smoddir : string;
-  stripfile, curBranch: string;
+  stripfile, curBranch, usebranch: string;
+  isOK : boolean;
 begin
   LoadAuthors;
   commitName := IncludeTrailingPathDelimiter(FOutputDir) + 'commit.$$$';
@@ -1566,6 +1605,7 @@ begin
 
     ForceDirectories(FOutputDir);
 
+    usebranch := IfThen(FBranch='','master',FBranch);
     InitGit;
     curBranch := GitCurrentBranch;
     if curBranch <> TCTag then
@@ -1574,9 +1614,18 @@ begin
         Git(['checkout', TCTag])
       else
       begin
+
         if HasTCRef(#0,true) and (curBranch <> TCTagOld) then
-          Git(['checkout', TCTagOld]);
-        Git(['checkout', '-b', TCTag]);
+          Git(['checkout', TCTagOld])
+        else if curBranch <> usebranch then
+        begin
+          if GitHasRef(useBranch) then
+            Git(['checkout', useBranch])
+          else if FAllowOrphan then
+            Git(['checkout', '--orphan', useBranch]);
+        end;
+
+        Git(['checkout',  '-b', TCTag]);
       end;
     end;
 
@@ -1601,7 +1650,15 @@ begin
         else
         begin
           if HasTCRef(smoddir, true) and (curBranch <> TCTagOld) then
-            Git(['checkout', TCTagOld],nil,true,smoddir);
+            Git(['checkout', TCTagOld],nil,true,smoddir)
+          else if curBranch <> useBranch then
+          begin
+            if GitHasRef(useBranch, smoddir) then
+              Git(['checkout', useBranch], nil,true,smoddir)
+            else if FAllowOrphan then
+              Git(['checkout', '--orphan', usebranch], nil, true, smoddir);
+          end;
+
           Git(['checkout', '-b', TCTag],nil,true,smoddir);
         end;
       end;
@@ -2080,6 +2137,7 @@ var
   idx, foundsign: integer;
   fileinfs: array of TFileInfo;
   curInfo: TFileInfo;
+  mainBranch : String;
   (*RevisionID: Cardinal;
   CheckoutInfo: PCheckoutInfo;
   filePath, basepath : String;
@@ -2102,14 +2160,20 @@ begin
       Writeln('Missing GIT reference :' + TCTag);
       exit;
     end;
+    if FBranch = '' then
+      mainBranch := 'master'
+    else
+      mainBranch := FBranch;
+
+
     gitout.Clear;
     // Now the common ancestor
-    Git(['merge-base', TCTag, 'master'], gitout);
+    Git(['merge-base', TCTag, mainBranch], gitout);
     ancestor := GetSingle(gitout);
     // We want the 'master' to be a direct descendent of TCTag.
     if (ancestor <> tagrev) then
     begin
-      Writeln('master is not an a descendent of ' + TCTag +
+      Writeln(mainBranch+' is not an a descendent of ' + TCTag +
           ' please merge or rebase so that it is.');
       exit;
     end;
@@ -2117,7 +2181,7 @@ begin
     Git(['checkout', TCTag]);
 
     // Generate a list of items from master, stopping at TCTag.
-    Git(['rev-list', '--reverse', 'master', '^' + TCTag], gitout);
+    Git(['rev-list', '--reverse', mainBranch, '^' + TCTag], gitout);
 
     lastRef := tagrev;
     messages := nil;
