@@ -1872,25 +1872,44 @@ begin
             if FileExists(stripfile) then
             begin
               // Process files.
-              case IndexText(extension, ['.dfm', '.pas', '.dpr']) of
-                0: { DFM }
-                  if IsDFMBinary(stripfile) then
-                  begin
-                    if Dfm2Txt(stripfile, stripfile + '.texted') then
+              try
+                case IndexText(extension, ['.dfm', '.pas', '.dpr']) of
+                  0: { DFM }
+                    if IsDFMBinary(stripfile) then
                     begin
-                      if FileExists(stripfile + '.origin') then
-                        sysutils.DeleteFile(stripfile + '.origin');
-                      if not sysutils.RenameFile(stripfile,
-                        stripfile + '.origin') then
-                        Writeln('Rename ' + stripfile + ' to origin failed')
-                      else if not sysutils.RenameFile(stripfile + '.texted',
-                        stripfile) then
-                        Writeln('Rename of ' + stripfile + '.texted failed');
+                      try
+                        isOK := Dfm2Txt(stripfile, stripfile + '.texted') ;
+                      except
+                        on E : Exception do
+                        begin
+                          Writeln('Error Converting '+stripfile+' to text dfm: '+E.Message);
+                          Git(['checkout','--', gitnameext], nil, cdoFileadd in FDebugOpts, outDir);
+                          // Restore last
+                          if FileExists(stripfile + '.origin') then
+                            sysutils.DeleteFile(stripfile + '.origin');
+                        end;
+                      end;
+                      if isok then
+                      begin
+                        if FileExists(stripfile + '.origin') then
+                          sysutils.DeleteFile(stripfile + '.origin');
+                        if not sysutils.RenameFile(stripfile,
+                          stripfile + '.origin') then
+                          Writeln('Rename ' + stripfile + ' to origin failed')
+                        else if not sysutils.RenameFile(stripfile + '.texted',
+                          stripfile) then
+                          Writeln('Rename of ' + stripfile + '.texted failed');
+                      end;
                     end;
-                  end;
-                1: { PAS,DPR }
-                  if FStripMacros then
-                    StripFileMacros(stripfile);
+                  1: { PAS,DPR }
+                    if FStripMacros then
+                      StripFileMacros(stripfile);
+                end;
+              except
+                on E : Exception do
+                begin
+                  Writeln('Error Normalising: '+StripFile+' :'+E.Message);
+                end;
               end;
 
               // Add file (use -- to make sure the file is treated as a file)
