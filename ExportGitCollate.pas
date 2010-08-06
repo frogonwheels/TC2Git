@@ -329,7 +329,7 @@ implementation
 
 uses
   sysutils, Generics.Defaults, TCVcsTypes, TCVCSUtils, TCVcsConst,
-  AnsiStrings, StrUtils, shellAPI, windows, messages, DateUtils;
+  AnsiStrings, StrUtils, shellAPI, windows, messages, DateUtils, registry;
 
 const
   CMaxSecsGap = 300;
@@ -1057,7 +1057,9 @@ var
         Write(strBuf);
     end;
   end;
-
+var
+  reg : TRegistry;
+  oldCP, ACP : Cardinal;
 begin
 
   Security.nlength := SizeOf(TSecurityAttributes);
@@ -1086,35 +1088,65 @@ begin
         Directory := nil
       else
         Directory := PChar(TrimDir);
-      cmdline := '';
+      oldCP := GetConsoleCP;
+      acp := 0;
+      reg := TRegistry.Create;
+      try
+        reg.RootKey := HKEY_LOCAL_MACHINE;
+
+        if (reg.OpenKeyReadOnly('\SYSTEM\CurrentControlSet\Control\Nls\CodePage')) then
+        begin
+          try
+            acp := Cardinal(StrToInt(reg.ReadString('ACP')));
+          except
+            on E : Exception do
+              WriteLn('Getting CP: '+E.message);
+          end;
+        end;
+      finally
+        reg.Free;
+      end;
+
+      if ExtractFileExt(ExpandFileName(cmd)) = '.cmd' then
+      begin
+        cmdline := 'cmd /C';
+
+      end
+      else
+        cmdline := '';
       AddToCommand(cmd);
       for param in params do
         AddToCommand(param);
-
-      if CreateProcess(nil, PChar(cmdline), @Security, @Security, true,
-        NORMAL_PRIORITY_CLASS, nil, Directory, StartupInfo, ProcessInfo) then
-      begin
-        try
-          Buffer := AllocMem(CReadBuffer + 1);
+      if acp <> 0 then
+        SetConsoleCP(acp);
+      try
+        if CreateProcess(nil, PChar(cmdline), @Security, @Security, true,
+          NORMAL_PRIORITY_CLASS, nil, Directory, StartupInfo, ProcessInfo) then
+        begin
           try
-            while WaitForSingleObject(ProcessInfo.hProcess, 0) <> WAIT_OBJECT_0 do
-            begin
-              // -- check if the process is still active
-              GetExitCodeProcess(ProcessInfo.hProcess, ExitCode);
-              if ExitCode <> STILL_ACTIVE then
-                break;
+            Buffer := AllocMem(CReadBuffer + 1);
+            try
+              while WaitForSingleObject(ProcessInfo.hProcess, 0) <> WAIT_OBJECT_0 do
+              begin
+                // -- check if the process is still active
+                GetExitCodeProcess(ProcessInfo.hProcess, ExitCode);
+                if ExitCode <> STILL_ACTIVE then
+                  break;
 
+                ReadData;
+              end;
               ReadData;
+            finally
+              FreeMem(Buffer);
             end;
-            ReadData;
+            GetExitCodeProcess(ProcessInfo.hProcess, ExitCode);
           finally
-            FreeMem(Buffer);
+            CloseHandle(ProcessInfo.hProcess);
+            CloseHandle(ProcessInfo.hThread);
           end;
-          GetExitCodeProcess(ProcessInfo.hProcess, ExitCode);
-        finally
-          CloseHandle(ProcessInfo.hProcess);
-          CloseHandle(ProcessInfo.hThread);
         end;
+      finally
+        SetConsoleCP(oldCP);
       end;
       if assigned(lines) then
         lines.Text := allstrings;
@@ -1130,10 +1162,13 @@ function TTCCollator.Git(cmd: array of string; return: TStrings = nil; echo: Boo
 var
   gitcmd, s: string;
 begin
-  if FCommand = '' then
-    gitcmd := 'c:\Program Files\Git\cmd\git.cmd'
+  if FCommand <> '' then
+    gitcmd := FCommand
   else
-    gitcmd := FCommand;
+  begin
+    gitcmd := 'c:\Program Files\Git\bin\git.exe'; //cmd\git.cmd'
+  end;
+
   if echo then
   begin
     Write('git');
