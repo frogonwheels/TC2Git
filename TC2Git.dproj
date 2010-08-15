@@ -20,7 +20,7 @@
 			<Base>true</Base>
 		</PropertyGroup>
 		<PropertyGroup Condition="'$(Base)'!=''">
-			<BRCC_IncludePath>..\tcvcsapi;c:\projects\tcvcsapi;$(BRCC_IncludePath)</BRCC_IncludePath>
+			<BRCC_IncludePath>tcvcsapi;$(BRCC_IncludePath)</BRCC_IncludePath>
 			<DCC_TypedAtParameter>true</DCC_TypedAtParameter>
 			<DCC_ConsoleTarget>true</DCC_ConsoleTarget>
 			<DCC_UsePackage>vclx;vcl;vclimg;dbrtl;Rave77VCL;bdertl;rtl;vclactnband;vcldb;vcldbx;vcltouch;xmlrtl;dsnap;dsnapcon;TeeUI;TeeDB;Tee;vclib;ibxpress;adortl;IndyCore;IndySystem;IndyProtocols;inet;intrawebdb_100_140;Intraweb_100_140;VclSmp;vclie;inetdb;webdsnap;websnap;inetdbbde;inetdbxpress;soaprtl;vclribbon;DbxCommonDriver;DbxClientDriver;DBXInterBaseDriver;DBXMySQLDriver;dbexpress;dbxcds;G113_R120;tmsd2010;weSYM_r2010;tmsexd2010;AsyncFree_R2010;A407_R120;webase_r2010;wePOS_r2010;Ingenico</DCC_UsePackage>
@@ -53,15 +53,15 @@
 				<ContainerId>RC</ContainerId>
 				<Form>iconfile.res</Form>
 			</RcCompile>
-			<DCCReference Include="..\tcvcsapi\TCDirectIntf.pas"/>
+			<DCCReference Include="tcvcsapi\TCDirectIntf.pas"/>
 			<DCCReference Include="ExportGitCollate.pas"/>
-			<DCCReference Include="..\tcvcsapi\TCVcsConst.pas"/>
-			<DCCReference Include="..\tcvcsapi\TCVcsTypes.pas"/>
-			<DCCReference Include="..\tcvcsapi\TCVcsUtils.pas"/>
-			<DCCReference Include="..\tcvcsapi\TrkIntf.pas"/>
-			<DCCReference Include="..\tcvcsapi\TCTrkConst.pas"/>
-			<DCCReference Include="..\tcvcsapi\TCTrkTypes.pas"/>
-			<DCCReference Include="..\tcvcsapi\TCTrkUtils.pas"/>
+			<DCCReference Include="tcvcsapi\TCVcsConst.pas"/>
+			<DCCReference Include="tcvcsapi\TCVcsTypes.pas"/>
+			<DCCReference Include="tcvcsapi\TCVcsUtils.pas"/>
+			<DCCReference Include="tcvcsapi\TrkIntf.pas"/>
+			<DCCReference Include="tcvcsapi\TCTrkConst.pas"/>
+			<DCCReference Include="tcvcsapi\TCTrkTypes.pas"/>
+			<DCCReference Include="tcvcsapi\TCTrkUtils.pas"/>
 			<None Include="ModelSupport_TC2Git\default.txaPackage"/>
 			<None Include="ModelSupport_TC2Git\default.txvpck"/>
 			<None Include="ModelSupport_TC2Git\TCVcsTypes\default.txaPackage"/>
