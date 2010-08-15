@@ -715,7 +715,14 @@ begin
   FConnection := Connection;
   FUsername := Name;
   FPassword := Password;
+
   VcsErrCvt(VcsConnect(Connection, Name, Password), Connection);
+
+  if FUseTrackUsers then
+  begin
+    FUsers := TTCUserList.Create;
+    FUsers.LoadUsers(FConnection, FUsername, FPassword);
+  end;
 
   if (FOutputDir <> '') then
   begin
@@ -723,6 +730,7 @@ begin
     if FileExists(mapexcl) then
       ReadMaps(mapexcl);
   end;
+
 end;
 
 constructor TTCCollator.Create;
@@ -3322,19 +3330,22 @@ begin
   begin
     user := Author;
     email := '';
-    if FUseTrackUsers and not assigned(FUsers) then
+    if FUseTrackUsers then
     begin
-      FUsers := TTCUserList.Create;
-      FUsers.LoadUsers(FConnection, FUsername, FPassword);
-    end;
-    for userobj in FUsers do
-    begin
-      if CompareText(userObj.UserName, Author) = 0 then
+      if not assigned(FUsers) then
       begin
-        if userObj.FullName <> '' then
-          user := userObj.FullName;
-        email := userObj.Email;
-        break;
+        FUsers := TTCUserList.Create;
+        FUsers.LoadUsers(FConnection, FUsername, FPassword);
+      end;
+      for userobj in FUsers do
+      begin
+        if CompareText(userObj.UserName, Author) = 0 then
+        begin
+          if userObj.FullName <> '' then
+            user := userObj.FullName;
+          email := userObj.Email;
+          break;
+        end;
       end;
     end;
 
@@ -4356,9 +4367,16 @@ begin
 end;
 
 procedure TTCUserList.LoadUsers(Const Connection, Name, Password : String);
+var
+  curCon, curName : String;
+  IsConnected : boolean;
 begin
   try
-    if TrkConnect(Connection, Name, Password) = 0 then
+    isConnected := false;
+    TrkCurrentConnection(curCon, curName, IsConnected);
+    if not isConnected and (TrkConnect(Connection, Name, Password) = 0) then
+      isConnected := true;
+    if isConnected then
       TrkEnumUsers(EnumAddUsers, self);
     // Ignore any error - just won't be loaded - not the end of the world.
   except
