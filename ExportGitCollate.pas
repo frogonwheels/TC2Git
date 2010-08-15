@@ -1,4 +1,12 @@
 unit ExportGitCollate;
+{
+  Copyright: Michael Geddes 2010
+
+  This software is licensed under the CC-GNU GPL version 2.0 or later.
+  http://creativecommons.org/licenses/GPL/2.0/
+
+  The copyright does not extend to the Team Coherence API used by this unit.
+}
 
 interface
 
