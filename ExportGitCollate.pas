@@ -1550,12 +1550,17 @@ var
     f: TextFile;
     cmt, ref : string;
     idx: integer;
+
+    procedure WriteLn_UTF8(aStr: string);
+    begin
+     WriteLn(f, UTF8String(aStr))
+    end;
   begin
     AssignFile(f, filename);
     Rewrite(f);
     try
       if Comments.count = 0 then
-        WriteLn(f, '-')
+        WriteLn_UTF8('-')
       else
       begin
         for idx := 0 to Comments.Count - 1 do
@@ -1563,19 +1568,19 @@ var
           cmt := Comments[idx];
           // Add a paragraph separator from first line.
           if (idx = 1) and (Trim(cmt) <> '') then
-            Writeln(F, '');
-          Writeln(F, cmt);
+            WriteLn_UTF8('');
+          WriteLn_UTF8(cmt);
         end;
-        Writeln(F, '');
+        WriteLn_UTF8('');
       end;
       if FUseSignoff then
-        Writeln(f, 'Signed-off-by: ' + signoff);
+        WriteLn_UTF8('Signed-off-by: ' + signoff);
       if refs.count > 0 then
       begin
-        Writeln(f, CRevBegin);
+        WriteLn_UTF8(CRevBegin);
         for ref in refs do
-          Writeln(f,ref);
-        Writeln(f, CRevEnd);
+          WriteLn_UTF8(ref);
+        WriteLn_UTF8(CRevEnd);
       end;
     finally
       CloseFile(f);
