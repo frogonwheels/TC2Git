@@ -528,7 +528,7 @@ begin
             if length(curparam) < 3 then
               collator.UseSignoff := true
             else
-              collator.UseSignoff := curParam[3]= '-';
+              collator.UseSignoff := (curParam[3] <> '-');
 {$IFDEF FEAT_UPLOAD}
           'U', 'u':       
              doUpload := true;
