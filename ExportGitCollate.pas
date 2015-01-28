@@ -1377,27 +1377,37 @@ begin
       Git(['symbolic-ref','HEAD','refs/heads/'+FBranch], nil, cdoInit in FDebugOpts, path);
 
     isNew := true;
+
     gitignore := IncludeTrailingPathDelimiter(Path) + '.gitignore';
 
-    AssignFile(f, gitignore);
-    ReWrite(f);
-    try
-      Writeln(f, 'commit.$$$');
-      Writeln(f, '*.[Dd][Cc][PUpu]');
-      Writeln(f, '*.[bB][Pp][Ll]');
-      Writeln(f, '*.identcache');
-      Writeln(f, '*.[bB][Aa][Kk]');
-      Writeln(f, '*.~*');
-      Writeln(f, '*.[Dd][Ss][KkMm]');
-      Writeln(f, '*.copy');
-      Writeln(f, '*.orig');
-      Writeln(f, '*.sw[poqrst]');
-      Writeln(f, '.authors');
-      Writeln(f, '.tcdirs');
-      Writeln(F, '*.origin');
-    finally
-      CloseFile(f);
+    if not (
+        FileExists('.gitignore.template')
+      and
+        CopyFile(PChar('.gitignore.template'), PChar(gitignore), False)
+          )
+    then
+    begin
+      AssignFile(f, gitignore);
+      ReWrite(f);
+      try
+        Writeln(f, 'commit.$$$');
+        Writeln(f, '*.[Dd][Cc][PUpu]');
+        Writeln(f, '*.[bB][Pp][Ll]');
+        Writeln(f, '*.identcache');
+        Writeln(f, '*.[bB][Aa][Kk]');
+        Writeln(f, '*.~*');
+        Writeln(f, '*.[Dd][Ss][KkMm]');
+        Writeln(f, '*.copy');
+        Writeln(f, '*.orig');
+        Writeln(f, '*.sw[poqrst]');
+        Writeln(f, '.authors');
+        Writeln(f, '.tcdirs');
+        Writeln(F, '*.origin');
+      finally
+        CloseFile(f);
+      end;
     end;
+
     Git(['add','--','.gitignore'], nil, cdoInit in FDebugOpts, path);
     if addTcDirs then
     begin
