@@ -10,6 +10,12 @@ unit ExportGitCollate;
 
 interface
 
+{$IF Declared(CompilerVersion)}
+  {$IF (CompilerVersion  >= 29)}
+    {$DEFINE DXE8_LVL}
+  {$IFEND}
+{$IFEND}
+
 uses TCDirectIntf, Generics.Collections, classes, TrkIntf;
 {$DEFINE GROUP_DEPENDS}
 //{$DEFINE FEAT_UPLOAD}
@@ -418,7 +424,7 @@ var
   Prompt: TPromptModes;
   curPrompt : TPromptMode;
   promptlist: TStringList;
-{$IFDEF FEAT_UPLOAD}  
+{$IFDEF FEAT_UPLOAD}
   doUpload: Boolean;
 {$ENDIF}
   doApplyPatch : Boolean;
@@ -530,7 +536,7 @@ begin
             else
               collator.UseSignoff := (curParam[3] <> '-');
 {$IFDEF FEAT_UPLOAD}
-          'U', 'u':       
+          'U', 'u':
              doUpload := true;
 {$ENDIF}
           '@': // Read file of maps/exclusions
@@ -1008,10 +1014,10 @@ end;
 
 procedure ClearCheckoutInfo(choutinf: PCheckoutInfo);
 begin
-  StrCopy(choutinf.Comments, '');
-  StrCopy(choutinf.Extra, '');
-  StrCopy(choutinf.revision, '');
-  StrCopy(choutinf.LocalPath, '');
+  {$IFDEF DXE8_LVL}AnsiStrings.{$ENDIF}StrCopy(choutinf.Comments, '');
+  {$IFDEF DXE8_LVL}AnsiStrings.{$ENDIF}StrCopy(choutinf.Extra, '');
+  {$IFDEF DXE8_LVL}AnsiStrings.{$ENDIF}StrCopy(choutinf.revision, '');
+  {$IFDEF DXE8_LVL}AnsiStrings.{$ENDIF}StrCopy(choutinf.LocalPath, '');
   choutinf.VersionID := 0;
   choutinf.AssignVersionID := 0;
   choutinf.Overwrite := false;
@@ -1833,8 +1839,8 @@ begin
           choutinf.Lock := false;
           choutinf.Overwrite := true;
           choutinf.Flags := co_LeaveWorkfileWritable or co_IgnoreLocked;
-          StrCopy(choutinf.revision, PAnsiChar(revid));
-          StrCopy(choutinf.LocalPath, PAnsiChar(AnsiString(filepath)));
+          {$IFDEF DXE8_LVL}AnsiStrings.{$ENDIF}StrCopy(choutinf.revision, PAnsiChar(revid));
+          {$IFDEF DXE8_LVL}AnsiStrings.{$ENDIF}StrCopy(choutinf.LocalPath, PAnsiChar(AnsiString(filepath)));
 
           // Debugging
           if cdoFileGet in FDebugOpts then
@@ -3850,8 +3856,8 @@ end;
 
 procedure ClearCheckinInfo(chininf : PCheckinInfo; comments : String = '');
 begin
-  StrCopy( chininf.Comments , PAnsiChar(AnsiString(comments)));
-  StrCopy(chininf.Extra,'');
+  {$IFDEF DXE8_LVL}AnsiStrings.{$ENDIF}StrCopy( chininf.Comments , PAnsiChar(AnsiString(comments)));
+  {$IFDEF DXE8_LVL}AnsiStrings.{$ENDIF}StrCopy(chininf.Extra,'');
   chininf.VersionID := 0;
   chininf.Flags := 0;
 end;
