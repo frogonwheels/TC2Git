@@ -11,7 +11,8 @@ It supports bad dates - reordering the commits such that they
 preserve an individual file's check-in order.
 
 It supports some basic whitespace and $LOG macro stripping,
-as well as for storing Delphi binary dfm files as text dfs.
+as well as for storing Delphi binary dfm files as text dfs (parameter --binary-dfm-to-text).
+
 
 There is also support for the equivalent of a git pm - taking a patch
 formatted with git-format-patch and applying it to a TC repository. I ended
@@ -35,7 +36,7 @@ Usage
 
 | Option               | Description |
 |----------------------|-------------|
-|`/C {TCconnection}`    |Specify the TC connection to use|
+|`/C {TCconnection}`   |Specify the TC connection to use|
 |`/G <gapseconds>`     |maximum seconds for grouping a commit|
 |`/O <OutputDir>`      |Export directory|
 |`/X <gitpath>`        |Command path for git|
@@ -52,7 +53,8 @@ Usage
 |`--dump <file>`       |Dump commits to file|
 |`--no-fetch`          |Don't fetch from TC|
 |`--strip-macro`       |Strip RCS expansions from file|
-|`@  <configfilename>` |Filename with renames and skips|
+|`--binary-dfm-to-text`|Convert Binary DFM file to text format|
+|`/@ <configfilename>` |Filename with renames and skips|
 |`--allow-orphan`      |If the tag doesn't exist create an orphan repo|
 |`/D <debug>{,<debug>}`|Debug options:init,maps,detail,fileget,fileadd,commits,push,merge,prunelog|
 
