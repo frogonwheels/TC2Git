@@ -53,7 +53,7 @@ Usage
 |`--dump <file>`       |Dump commits to file|
 |`--no-fetch`          |Don't fetch from TC|
 |`--strip-macro`       |Strip RCS expansions from file|
-|`--binary-dfm-to-text`|Convert Binary DFM file to text format|
+|`-leave-binary-dfm`   |Disable DFM binary conversion to plain text|
 |`/@ <configfilename>` |Filename with renames and skips|
 |`--allow-orphan`      |If the tag doesn't exist create an orphan repo|
 |`/D <debug>{,<debug>}`|Debug options:init,maps,detail,fileget,fileadd,commits,push,merge,prunelog|
