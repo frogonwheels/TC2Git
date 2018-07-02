@@ -133,6 +133,7 @@ type
   TTCCollator = class
   private
     FStripMacros: Boolean;
+    FBinaryDfmToText: Boolean;
     procedure CollateCheckins;
     procedure GetAuthorsFilename(var fname: string);
     procedure DoDump(var F: Text);
@@ -339,6 +340,8 @@ type
     property PushAtEnd: boolean read FPushAtEnd write FPushAtEnd;
     // : Should macros be stripped from files!
     property StripMacros: Boolean read FStripMacros write FStripMacros;
+    // : Convert Binary Dfm to text file
+    property BinaryDfmToText: Boolean read FBinaryDfmToText write FBinaryDfmToText;
     //: Create a orphan branch if Tag doesn't exist.
     property AllowOrphan : Boolean read FAllowOrphan write FAllowOrphan;
 
@@ -569,7 +572,7 @@ begin
               case IndexText( copy(curParam, 3,length(curParam)-2),
                 ['trackusers', 'push', 'dump', 'no-fetch', 'strip-macro',
                  'strip-macros', 'apply-patch', 'apply-label', 'apply-checkin',
-                 'allow-orphan']) of
+                 'allow-orphan', '--leave-binary-dfm']) of
                 0:{trackusers} collator.UseTrackUsers := true;
                 1:{push} collator.PushAtEnd := true;
                 2:{dump}
@@ -599,6 +602,7 @@ begin
                   doOnlyCheckinPatch := true;
                 9:{allow-orphan}
                   collator.AllowOrphan := true;
+                10:{leave-binary-dfm} collator.BinaryDfmToText := false;
               else
                 raise exception.Create('Unknown option:'+curParam);
               end;
@@ -756,6 +760,7 @@ begin
   FSubmoduleMod.Duplicates := dupIgnore;
   FDiffSecs := CMaxSecsGap;
   FUseSignoff := true;
+  FBinaryDfmToText := true;
 end;
 
 procedure TTCCollator.BeforeDestruction;
@@ -1912,7 +1917,7 @@ begin
               try
                 case IndexText(extension, ['.dfm', '.pas', '.dpr']) of
                   0: { DFM }
-                    if IsDFMBinary(stripfile) then
+                    if FBinaryDfmToText and IsDFMBinary(stripfile) then
                     begin
                       try
                         isOK := Dfm2Txt(stripfile, stripfile + '.texted') ;
@@ -3170,7 +3175,13 @@ begin
     begin
       loadRi.vl := curFile.Revisions;
       loadRi.pfi := curFile;
-      VcsErrCvt(VcsEnumRevisions(curFile.ItemID, LoadRevisionsList, @loadRi));
+      try
+        VcsErrCvt(VcsEnumRevisions(curFile.ItemID, LoadRevisionsList, @loadRi));
+      except
+        WriteLn('');
+        WriteLn('Error read file name ' + curFile.Folder.TCPath + '/' + curFile.Filename);
+        raise;
+      end;
     end;
 
   end;
