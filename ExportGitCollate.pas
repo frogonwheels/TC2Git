@@ -635,6 +635,7 @@ begin
         ' --dump <file>        Dump commits to file'#13#10+
         ' --no-fetch           Don''t fetch from TC'#13#10+
         ' --strip-macro        Strip RCS expansions from file'#13#10 +
+        ' --leave-binary-dfm   Disable conversion of binary DFM to text DFM'#13#10 +
         ' @  <filename>        Filename with renames and skips'#13#10+
         '     path=newpath     Export to different path (relative to the output dir)'#13#10+
         '     path=-           Skip exports'#13#10 +

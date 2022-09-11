@@ -11,8 +11,9 @@ It supports bad dates - reordering the commits such that they
 preserve an individual file's check-in order.
 
 It supports some basic whitespace and $LOG macro stripping,
-as well as for storing Delphi binary dfm files as text dfs (parameter --binary-dfm-to-text).
+as well as for storing Delphi binary dfm files as text dfm (use parameter `--leave-binary-dfm` to skip the conversion).
 
+To use your own `.gitignore` file for initial commit rename it to `.gitignore.template` and put it to the current folder.
 
 There is also support for the equivalent of a git pm - taking a patch
 formatted with git-format-patch and applying it to a TC repository. I ended
@@ -53,7 +54,7 @@ Usage
 |`--dump <file>`       |Dump commits to file|
 |`--no-fetch`          |Don't fetch from TC|
 |`--strip-macro`       |Strip RCS expansions from file|
-|`-leave-binary-dfm`   |Disable DFM binary conversion to plain text|
+|`--leave-binary-dfm`  |Disable conversion of binary DFM to text DFM|
 |`/@ <configfilename>` |Filename with renames and skips|
 |`--allow-orphan`      |If the tag doesn't exist create an orphan repo|
 |`/D <debug>{,<debug>}`|Debug options:init,maps,detail,fileget,fileadd,commits,push,merge,prunelog|
