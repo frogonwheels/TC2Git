@@ -572,7 +572,7 @@ begin
               case IndexText( copy(curParam, 3,length(curParam)-2),
                 ['trackusers', 'push', 'dump', 'no-fetch', 'strip-macro',
                  'strip-macros', 'apply-patch', 'apply-label', 'apply-checkin',
-                 'allow-orphan', '--leave-binary-dfm']) of
+                 'allow-orphan', 'leave-binary-dfm']) of
                 0:{trackusers} collator.UseTrackUsers := true;
                 1:{push} collator.PushAtEnd := true;
                 2:{dump}
